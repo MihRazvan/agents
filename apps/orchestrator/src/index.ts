@@ -34,9 +34,13 @@ const WORLD_SEED = Number(process.env.WORLD_SEED ?? "271828");
 const operatorWallet = process.env.OPERATOR_WALLET ?? "0xD3aDbeefD3aDbeefD3aDbeefD3aDbeefD3aDbeef";
 const erc8004Identity = process.env.AGENT_ERC8004_ID ?? "agent:erc8004:trust-city-alpha";
 
-const GRID_MIN = -18;
-const GRID_MAX = 18;
+const GRID_MIN = -128;
+const GRID_MAX = 128;
 const GRID_STEP = 1;
+const ROAD_MAJOR_SPACING = 24;
+const ROAD_MINOR_SPACING = 12;
+const ROAD_MAJOR_HALF_WIDTH = 2;
+const ROAD_MINOR_HALF_WIDTH = 1;
 
 const manifest: AgentManifest = {
   agentName: "Trust City Autonomous Ops",
@@ -124,8 +128,8 @@ const agents: AgentRuntimeState[] = [
     role: "planner",
     phase: "idle",
     trustScore: 0.87,
-    position: hubPoint("planner", { x: 0, y: -1 }),
-    target: hubPoint("planner", { x: 0, y: -1 }),
+    position: hubPoint("planner"),
+    target: hubPoint("planner"),
     path: [],
     energy: 1,
     speed: 0.38
@@ -136,8 +140,8 @@ const agents: AgentRuntimeState[] = [
     role: "builder",
     phase: "idle",
     trustScore: 0.74,
-    position: hubPoint("builder", { x: -1, y: -1 }),
-    target: hubPoint("builder", { x: -1, y: -1 }),
+    position: hubPoint("builder"),
+    target: hubPoint("builder"),
     path: [],
     energy: 1,
     speed: 0.34
@@ -148,8 +152,8 @@ const agents: AgentRuntimeState[] = [
     role: "builder",
     phase: "idle",
     trustScore: 0.63,
-    position: hubPoint("builder", { x: 2, y: 0 }),
-    target: hubPoint("builder", { x: 2, y: 0 }),
+    position: hubPoint("builder", { x: 12, y: 0 }),
+    target: hubPoint("builder", { x: 12, y: 0 }),
     path: [],
     energy: 1,
     speed: 0.32
@@ -273,24 +277,39 @@ function getSnapshot(): WorldSnapshot {
 }
 
 function buildDistricts(): District[] {
-  const districtNames = [
-    { name: "Core Nexus", theme: "core" as const },
-    { name: "Forge Quarter", theme: "industrial" as const },
-    { name: "Helix Labs", theme: "research" as const },
-    { name: "Lumen Habitat", theme: "residential" as const }
+  const districtDefs = [
+    {
+      name: "Core Nexus",
+      theme: "core" as const,
+      center: { x: ROLE_HUBS.verifier.position.x - 8, y: ROLE_HUBS.verifier.position.y + 24 }
+    },
+    {
+      name: "Forge Quarter",
+      theme: "industrial" as const,
+      center: { x: ROLE_HUBS.builder.position.x + 18, y: ROLE_HUBS.builder.position.y - 24 }
+    },
+    {
+      name: "Helix Labs",
+      theme: "research" as const,
+      center: { x: ROLE_HUBS.planner.position.x - 12, y: ROLE_HUBS.planner.position.y + 24 }
+    },
+    {
+      name: "Lumen Habitat",
+      theme: "residential" as const,
+      center: { x: ROLE_HUBS.publisher.position.x - 8, y: ROLE_HUBS.publisher.position.y + 30 }
+    }
   ];
 
-  return districtNames.map((item, index) => {
-    const angle = (Math.PI * 2 * index) / districtNames.length;
-    const radius = 7.8 + rng() * 1.8;
+  return districtDefs.map((item, index) => {
+    const jitterScale = 2 + index;
     return {
       id: `district-${index + 1}`,
       name: item.name,
       center: {
-        x: Math.cos(angle) * radius,
-        y: Math.sin(angle) * radius + 2
+        x: item.center.x + (rng() * 2 - 1) * jitterScale,
+        y: item.center.y + (rng() * 2 - 1) * jitterScale
       },
-      radius: 4.2 + rng() * 1.3,
+      radius: 10 + rng() * 4,
       theme: item.theme,
       riskLevel: 0.45 + rng() * 0.5
     };
@@ -308,8 +327,18 @@ function clampToGrid(point: Vec2): GridPoint {
   };
 }
 
+function distanceToGridLine(value: number, spacing: number): number {
+  const mod = ((value % spacing) + spacing) % spacing;
+  return Math.min(mod, spacing - mod);
+}
+
 function isRoadCell(cell: GridPoint): boolean {
-  return cell.x % 4 === 0 || cell.y % 4 === 0;
+  const majorRoad = distanceToGridLine(cell.x, ROAD_MAJOR_SPACING) <= ROAD_MAJOR_HALF_WIDTH || distanceToGridLine(cell.y, ROAD_MAJOR_SPACING) <= ROAD_MAJOR_HALF_WIDTH;
+  if (majorRoad) {
+    return true;
+  }
+  const minorRoad = distanceToGridLine(cell.x, ROAD_MINOR_SPACING) <= ROAD_MINOR_HALF_WIDTH || distanceToGridLine(cell.y, ROAD_MINOR_SPACING) <= ROAD_MINOR_HALF_WIDTH;
+  return minorRoad;
 }
 
 function isBlockedCell(cell: GridPoint): boolean {
@@ -317,16 +346,7 @@ function isBlockedCell(cell: GridPoint): boolean {
     return true;
   }
 
-  if (isRoadCell(cell)) {
-    return false;
-  }
-
-  if (Math.abs(cell.x) <= 2 && Math.abs(cell.y - 2) <= 2) {
-    return true;
-  }
-
-  const hash = ((cell.x * 73856093) ^ (cell.y * 19349663) ^ WORLD_SEED) >>> 0;
-  return hash % 13 === 0;
+  return !isRoadCell(cell);
 }
 
 function movementCost(cell: GridPoint): number {

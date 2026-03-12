@@ -126,27 +126,27 @@ export interface RoleHub {
 export const ROLE_HUBS: Record<AgentRole, RoleHub> = {
   scout: {
     name: "Recon Dock",
-    position: { x: -14, y: -10 },
+    position: { x: -84, y: -36 },
     purpose: "Discover incidents and initiate response threads."
   },
   planner: {
     name: "Strategy Atrium",
-    position: { x: -6, y: -10 },
+    position: { x: -36, y: -24 },
     purpose: "Turn discovered incidents into executable plans."
   },
   builder: {
     name: "Execution Yard",
-    position: { x: 1, y: -10 },
+    position: { x: 12, y: -12 },
     purpose: "Apply fixes and run operational toolchains."
   },
   verifier: {
     name: "Validation Gate",
-    position: { x: 8, y: -10 },
+    position: { x: 60, y: -6 },
     purpose: "Check outputs, enforce quality and trust policy."
   },
   publisher: {
     name: "Receipt Terminal",
-    position: { x: 12, y: -10 },
+    position: { x: 108, y: 0 },
     purpose: "Finalize submissions and publish ERC-8004 receipts."
   }
 };
