@@ -1,0 +1,30 @@
+{
+  "agentName": "Trust City Autonomous Ops",
+  "operatorWallet": "0xD3aDbeefD3aDbeefD3aDbeefD3aDbeefD3aDbeef",
+  "erc8004Identity": "agent:erc8004:trust-city-alpha",
+  "supportedTools": [
+    "github_api",
+    "git",
+    "security_scanner",
+    "test_runner",
+    "websocket_stream",
+    "erc8004_registry_writer"
+  ],
+  "supportedTechStacks": [
+    "TypeScript",
+    "React",
+    "Three.js",
+    "Node.js",
+    "EVM"
+  ],
+  "computeConstraints": {
+    "maxToolCalls": 280,
+    "maxRuntimeSeconds": 1200,
+    "retryLimit": 3
+  },
+  "supportedTaskCategories": [
+    "ci_failure_response",
+    "dependency_vulnerability_patch",
+    "reputation_gated_multi_agent_collaboration"
+  ]
+}
