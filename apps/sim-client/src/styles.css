@@ -133,7 +133,7 @@ body,
 .side-panel {
   display: grid;
   gap: 0.7rem;
-  grid-template-rows: auto auto auto auto minmax(140px, 1fr);
+  grid-template-rows: auto auto auto auto auto auto minmax(140px, 1fr);
   min-height: 0;
 }
 
@@ -226,6 +226,14 @@ body,
   letter-spacing: 0.08em;
 }
 
+.agent-home {
+  margin: 0.15rem 0 0;
+  font-size: 0.66rem;
+  color: #a7c1e4;
+  letter-spacing: 0.02em;
+  font-family: "IBM Plex Mono", monospace;
+}
+
 .agent-meta {
   text-align: right;
   font-family: "IBM Plex Mono", monospace;
@@ -289,7 +297,7 @@ body,
   }
 
   .side-panel {
-    grid-template-rows: repeat(5, auto);
+    grid-template-rows: repeat(7, auto);
   }
 
   .roster-list,
