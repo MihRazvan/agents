@@ -28,6 +28,10 @@ export default function AnimatedAgentAvatar({ agent, incident }: Props) {
   const rootRef = useRef<THREE.Group>(null);
   const auraRef = useRef<THREE.Mesh>(null);
   const clipRef = useRef<string>("Idle");
+  const currentPosRef = useRef(new THREE.Vector3(agent.position.x, 0.72, agent.position.y));
+  const targetPosRef = useRef(new THREE.Vector3(agent.position.x, 0.72, agent.position.y));
+  const previousPosRef = useRef(new THREE.Vector3(agent.position.x, 0.72, agent.position.y));
+  const speedRef = useRef(0);
 
   const { scene, animations } = useGLTF("/assets/characters/RobotExpressive.glb");
 
@@ -51,7 +55,10 @@ export default function AnimatedAgentAvatar({ agent, incident }: Props) {
 
   const { actions } = useAnimations(animations, rootRef);
   const color = AGENT_COLORS[agent.role];
-  const moving = agent.path.length > 0;
+
+  useEffect(() => {
+    targetPosRef.current.set(agent.position.x, 0.72, agent.position.y);
+  }, [agent.position.x, agent.position.y]);
 
   useEffect(() => {
     const desired = PHASE_TO_CLIP[agent.phase] ?? "Idle";
@@ -79,20 +86,32 @@ export default function AnimatedAgentAvatar({ agent, incident }: Props) {
     };
   }, [actions]);
 
-  const [x, y, z] = worldPoint(agent.position);
-
   useFrame(({ clock }, delta) => {
     if (!rootRef.current) {
       return;
     }
 
-    const targetYaw = Math.atan2(agent.target.x - agent.position.x, agent.target.y - agent.position.y);
+    const blend = 1 - Math.exp(-delta * 8.5);
+    currentPosRef.current.lerp(targetPosRef.current, blend);
+    rootRef.current.position.x = currentPosRef.current.x;
+    rootRef.current.position.z = currentPosRef.current.z;
+
+    const frameDistance = currentPosRef.current.distanceTo(previousPosRef.current);
+    speedRef.current = THREE.MathUtils.damp(speedRef.current, frameDistance / Math.max(delta, 1e-4), 9, delta);
+    previousPosRef.current.copy(currentPosRef.current);
+
+    const lookAhead =
+      agent.path.length > 0
+        ? agent.path[0]
+        : { x: targetPosRef.current.x, y: targetPosRef.current.z };
+    const targetYaw = Math.atan2(lookAhead.x - currentPosRef.current.x, lookAhead.y - currentPosRef.current.z);
     rootRef.current.rotation.y = THREE.MathUtils.damp(rootRef.current.rotation.y, targetYaw + Math.PI, 7.5, delta);
-    rootRef.current.position.y = y + Math.sin(clock.getElapsedTime() * 4.8 + agent.position.x) * 0.03;
+    rootRef.current.position.y = 0.72 + Math.sin(clock.getElapsedTime() * 4.8 + currentPosRef.current.x) * 0.03;
 
     const active = actions[clipRef.current] ?? actions.Idle;
     if (active) {
-      active.timeScale = agent.phase === "execute" ? 1.32 : moving ? 1.04 : 0.82;
+      const speedNorm = THREE.MathUtils.clamp(speedRef.current / 2.2, 0, 1.7);
+      active.timeScale = agent.phase === "execute" ? 1.05 + speedNorm * 0.55 : 0.8 + speedNorm * 0.45;
       active.weight = 1;
     }
 
@@ -104,7 +123,7 @@ export default function AnimatedAgentAvatar({ agent, incident }: Props) {
   });
 
   return (
-    <group ref={rootRef} position={[x, y, z]}>
+    <group ref={rootRef} position={worldPoint(agent.position)}>
       <mesh ref={auraRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.58, 0]}>
         <ringGeometry args={[0.42, 0.55, 32]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.18} transparent opacity={0.35 + agent.trustScore * 0.2} />

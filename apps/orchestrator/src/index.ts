@@ -321,7 +321,7 @@ function isBlockedCell(cell: GridPoint): boolean {
 }
 
 function movementCost(cell: GridPoint): number {
-  return isRoadCell(cell) ? 1 : 1.55;
+  return isRoadCell(cell) ? 1 : 1.45;
 }
 
 function heuristic(a: GridPoint, b: GridPoint): number {
@@ -333,7 +333,11 @@ function neighborCells(cell: GridPoint): GridPoint[] {
     { x: cell.x + GRID_STEP, y: cell.y },
     { x: cell.x - GRID_STEP, y: cell.y },
     { x: cell.x, y: cell.y + GRID_STEP },
-    { x: cell.x, y: cell.y - GRID_STEP }
+    { x: cell.x, y: cell.y - GRID_STEP },
+    { x: cell.x + GRID_STEP, y: cell.y + GRID_STEP },
+    { x: cell.x + GRID_STEP, y: cell.y - GRID_STEP },
+    { x: cell.x - GRID_STEP, y: cell.y + GRID_STEP },
+    { x: cell.x - GRID_STEP, y: cell.y - GRID_STEP }
   ];
 }
 
@@ -374,6 +378,56 @@ function reconstructPath(cameFrom: Map<string, GridPoint>, current: GridPoint): 
   return path.map(cellToVec2);
 }
 
+function direction(a: Vec2, b: Vec2): Vec2 {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  return { x: dx / len, y: dy / len };
+}
+
+function simplifyPath(points: Vec2[]): Vec2[] {
+  if (points.length <= 2) {
+    return points;
+  }
+
+  const compressed: Vec2[] = [points[0]];
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const prev = compressed[compressed.length - 1];
+    const current = points[i];
+    const next = points[i + 1];
+    const d1 = direction(prev, current);
+    const d2 = direction(current, next);
+    const aligned = Math.abs(d1.x - d2.x) < 0.01 && Math.abs(d1.y - d2.y) < 0.01;
+    if (!aligned) {
+      compressed.push(current);
+    }
+  }
+  compressed.push(points[points.length - 1]);
+
+  const rounded: Vec2[] = [compressed[0]];
+  const cornerInset = 0.33;
+
+  for (let i = 1; i < compressed.length - 1; i += 1) {
+    const prev = compressed[i - 1];
+    const pivot = compressed[i];
+    const next = compressed[i + 1];
+    const inDir = direction(pivot, prev);
+    const outDir = direction(pivot, next);
+
+    rounded.push({
+      x: pivot.x + inDir.x * cornerInset,
+      y: pivot.y + inDir.y * cornerInset
+    });
+    rounded.push({
+      x: pivot.x + outDir.x * cornerInset,
+      y: pivot.y + outDir.y * cornerInset
+    });
+  }
+
+  rounded.push(compressed[compressed.length - 1]);
+  return rounded;
+}
+
 function planPath(start: Vec2, goal: Vec2): Vec2[] {
   const origin = clampToGrid(ensureWalkable(start));
   const target = clampToGrid(ensureWalkable(goal));
@@ -398,7 +452,7 @@ function planPath(start: Vec2, goal: Vec2): Vec2[] {
         result.shift();
       }
       result.push(goal);
-      return result;
+      return simplifyPath(result);
     }
 
     closedSet.add(currentKey);
@@ -409,7 +463,9 @@ function planPath(start: Vec2, goal: Vec2): Vec2[] {
         continue;
       }
 
-      const tentative = (gScore.get(currentKey) ?? Number.POSITIVE_INFINITY) + movementCost(neighbor);
+      const diagonal = neighbor.x !== current.x && neighbor.y !== current.y;
+      const edgeCost = diagonal ? Math.SQRT2 : 1;
+      const tentative = (gScore.get(currentKey) ?? Number.POSITIVE_INFINITY) + movementCost(neighbor) * edgeCost;
       if (tentative >= (gScore.get(neighborKey) ?? Number.POSITIVE_INFINITY)) {
         continue;
       }
@@ -427,7 +483,7 @@ function planPath(start: Vec2, goal: Vec2): Vec2[] {
     }
   }
 
-  return [goal];
+  return simplifyPath([start, goal]);
 }
 
 function distance(a: Vec2, b: Vec2): number {

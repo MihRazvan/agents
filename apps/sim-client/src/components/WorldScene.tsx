@@ -1,9 +1,10 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { Float, Line, OrbitControls, Sky, Stars, Text } from "@react-three/drei";
-import { Canvas, type ThreeElements, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import * as THREE from "three";
-import { AGENT_COLORS, type AgentRuntimeState, type Incident, type Vec2, type WorldSnapshot } from "@trust-city/shared";
+import { AGENT_COLORS, type Incident, type Vec2, type WorldSnapshot } from "@trust-city/shared";
 import AnimatedAgentAvatar from "./AnimatedAgentAvatar";
 
 interface Props {
@@ -17,7 +18,20 @@ interface Building {
   depth: number;
   height: number;
   hue: number;
+  lod: "near" | "far";
 }
+
+interface RoadLine {
+  axis: "h" | "v";
+  x: number;
+  z: number;
+  length: number;
+}
+
+const CHUNK_SIZE = 24;
+const NEAR_CHUNK_RADIUS = 3;
+const FAR_CHUNK_RADIUS = 6;
+const USER_CONTROL_PAUSE_MS = 9000;
 
 function hashNumber(seed: number, x: number, y: number): number {
   let value = (seed ^ (x * 374761393) ^ (y * 668265263)) >>> 0;
@@ -34,15 +48,153 @@ function toPathPoint(position: Vec2): [number, number, number] {
   return [position.x, 0.35, position.y];
 }
 
+function severityRank(severity: Incident["severity"]): number {
+  if (severity === "high") {
+    return 3;
+  }
+  if (severity === "medium") {
+    return 2;
+  }
+  return 1;
+}
+
+function getFocusPoint(snapshot: WorldSnapshot | null): Vec2 {
+  if (!snapshot) {
+    return { x: 0, y: 0 };
+  }
+
+  const activeIncidents = snapshot.incidents.filter((incident) => incident.status === "open" || incident.status === "in_progress");
+  const focusIncident =
+    activeIncidents.find((incident) => incident.id === snapshot.cinematicFocus) ??
+    activeIncidents.sort((a, b) => severityRank(b.severity) - severityRank(a.severity))[0];
+
+  if (focusIncident) {
+    return focusIncident.position;
+  }
+
+  if (snapshot.agents.length === 0) {
+    return { x: 0, y: 0 };
+  }
+
+  const sum = snapshot.agents.reduce(
+    (acc, agent) => {
+      acc.x += agent.position.x;
+      acc.y += agent.position.y;
+      return acc;
+    },
+    { x: 0, y: 0 }
+  );
+
+  return {
+    x: sum.x / snapshot.agents.length,
+    y: sum.y / snapshot.agents.length
+  };
+}
+
+function buildChunkBuildings(seed: number, cx: number, cz: number, lod: "near" | "far"): Building[] {
+  const countBase = lod === "near" ? 7 : 2;
+  const count = countBase + Math.floor(hashNumber(seed + 11, cx, cz) * (lod === "near" ? 5 : 3));
+  const originX = cx * CHUNK_SIZE;
+  const originZ = cz * CHUNK_SIZE;
+  const spread = CHUNK_SIZE * 0.75;
+
+  const output: Building[] = [];
+
+  for (let i = 0; i < count; i += 1) {
+    const n1 = hashNumber(seed + i * 13, cx * 97 + i * 17, cz * 53 + i * 5);
+    const n2 = hashNumber(seed + i * 19, cx * 31 + i * 11, cz * 71 + i * 7);
+    const n3 = hashNumber(seed + i * 23, cx * 43 + i * 3, cz * 89 + i * 29);
+
+    output.push({
+      x: originX + (n1 - 0.5) * spread,
+      z: originZ + (n2 - 0.5) * spread,
+      width: (lod === "near" ? 1.1 : 1.8) + n2 * (lod === "near" ? 2.1 : 3.3),
+      depth: (lod === "near" ? 1.1 : 1.8) + n1 * (lod === "near" ? 2.0 : 3.1),
+      height: (lod === "near" ? 4.5 : 2.8) + n3 * (lod === "near" ? 20 : 10),
+      hue: 175 + Math.floor(n1 * 145),
+      lod
+    });
+  }
+
+  return output;
+}
+
+function buildStreamedCity(seed: number, focusPoint: Vec2): { near: Building[]; far: Building[]; roads: RoadLine[] } {
+  const focusChunkX = Math.round(focusPoint.x / CHUNK_SIZE);
+  const focusChunkZ = Math.round(focusPoint.y / CHUNK_SIZE);
+
+  const near: Building[] = [];
+  const far: Building[] = [];
+
+  for (let dz = -FAR_CHUNK_RADIUS; dz <= FAR_CHUNK_RADIUS; dz += 1) {
+    for (let dx = -FAR_CHUNK_RADIUS; dx <= FAR_CHUNK_RADIUS; dx += 1) {
+      const cx = focusChunkX + dx;
+      const cz = focusChunkZ + dz;
+      const dist = Math.max(Math.abs(dx), Math.abs(dz));
+
+      if (dist <= NEAR_CHUNK_RADIUS) {
+        near.push(...buildChunkBuildings(seed, cx, cz, "near"));
+      } else {
+        far.push(...buildChunkBuildings(seed, cx, cz, "far"));
+      }
+    }
+  }
+
+  const minChunkX = focusChunkX - FAR_CHUNK_RADIUS - 1;
+  const maxChunkX = focusChunkX + FAR_CHUNK_RADIUS + 1;
+  const minChunkZ = focusChunkZ - FAR_CHUNK_RADIUS - 1;
+  const maxChunkZ = focusChunkZ + FAR_CHUNK_RADIUS + 1;
+
+  const minX = minChunkX * CHUNK_SIZE;
+  const maxX = maxChunkX * CHUNK_SIZE;
+  const minZ = minChunkZ * CHUNK_SIZE;
+  const maxZ = maxChunkZ * CHUNK_SIZE;
+
+  const roads: RoadLine[] = [];
+  for (let x = minX; x <= maxX; x += 8) {
+    roads.push({ axis: "v", x, z: (minZ + maxZ) * 0.5, length: maxZ - minZ });
+  }
+  for (let z = minZ; z <= maxZ; z += 8) {
+    roads.push({ axis: "h", x: (minX + maxX) * 0.5, z, length: maxX - minX });
+  }
+
+  return { near, far, roads };
+}
+
 function BuildingBlock({ building }: { building: Building }) {
-  const color = new THREE.Color(`hsl(${building.hue}, 45%, 17%)`);
-  const emissive = new THREE.Color(`hsl(${building.hue}, 100%, 24%)`);
+  const color = new THREE.Color(`hsl(${building.hue}, ${building.lod === "near" ? 42 : 32}%, ${building.lod === "near" ? 17 : 13}%)`);
+  const emissive = new THREE.Color(`hsl(${building.hue}, 100%, ${building.lod === "near" ? 24 : 14}%)`);
 
   return (
-    <mesh position={[building.x, building.height / 2, building.z]} castShadow receiveShadow>
+    <mesh position={[building.x, building.height / 2, building.z]} castShadow={building.lod === "near"} receiveShadow>
       <boxGeometry args={[building.width, building.height, building.depth]} />
-      <meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={0.25} metalness={0.5} roughness={0.4} />
+      <meshStandardMaterial
+        color={color}
+        emissive={emissive}
+        emissiveIntensity={building.lod === "near" ? 0.25 : 0.12}
+        metalness={building.lod === "near" ? 0.5 : 0.35}
+        roughness={building.lod === "near" ? 0.4 : 0.55}
+      />
     </mesh>
+  );
+}
+
+function DynamicRoads({ roads }: { roads: RoadLine[] }) {
+  return (
+    <group>
+      {roads.map((road, index) => {
+        const isPrimary = index % 6 === 0;
+        const color = road.axis === "h" ? "#49d3ff" : "#8f7cff";
+        const width = isPrimary ? 0.24 : 0.13;
+
+        return (
+          <mesh key={`${road.axis}-${road.x}-${road.z}`} position={[road.x, 0.02, road.z]}>
+            <boxGeometry args={road.axis === "h" ? [road.length, 0.04, width] : [width, 0.04, road.length]} />
+            <meshStandardMaterial color={color} emissive={color} emissiveIntensity={isPrimary ? 1.35 : 0.75} />
+          </mesh>
+        );
+      })}
+    </group>
   );
 }
 
@@ -67,14 +219,14 @@ function DistrictOverlay({ snapshot }: { snapshot: WorldSnapshot }) {
   );
 }
 
-function TrafficLanes() {
+function TrafficLanes({ center }: { center: Vec2 }) {
   const movers = useMemo(() => {
-    return Array.from({ length: 26 }).map((_, index) => ({
+    return Array.from({ length: 36 }).map((_, index) => ({
       id: index,
       lane: (index % 2 === 0 ? "h" : "v") as "h" | "v",
       offset: index * 1.3,
-      speed: 0.5 + (index % 7) * 0.06,
-      span: 34,
+      speed: 0.44 + (index % 7) * 0.06,
+      span: 120,
       color: index % 3 === 0 ? "#67dfff" : index % 3 === 1 ? "#ba9cff" : "#94ff7b"
     }));
   }, []);
@@ -82,13 +234,13 @@ function TrafficLanes() {
   return (
     <group>
       {movers.map((mover) => (
-        <TrafficNode key={mover.id} {...mover} />
+        <TrafficNode key={mover.id} center={center} {...mover} />
       ))}
     </group>
   );
 }
 
-function TrafficNode(props: { lane: "h" | "v"; offset: number; speed: number; span: number; color: string }) {
+function TrafficNode(props: { lane: "h" | "v"; offset: number; speed: number; span: number; color: string; center: Vec2 }) {
   const meshRef = useRef<THREE.Mesh>(null);
 
   useFrame(({ clock }) => {
@@ -99,16 +251,16 @@ function TrafficNode(props: { lane: "h" | "v"; offset: number; speed: number; sp
     const oscillation = ((t % props.span) / props.span) * 2 - 1;
 
     if (props.lane === "h") {
-      meshRef.current.position.set(oscillation * 16, 0.12, -8 + Math.sin(props.offset) * 9);
+      meshRef.current.position.set(props.center.x + oscillation * 55, 0.12, props.center.y - 24 + Math.sin(props.offset) * 14);
     } else {
-      meshRef.current.position.set(-14 + Math.cos(props.offset * 0.75) * 11, 0.12, oscillation * 12);
+      meshRef.current.position.set(props.center.x - 36 + Math.cos(props.offset * 0.75) * 24, 0.12, props.center.y + oscillation * 48);
     }
   });
 
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[0.09, 10, 10]} />
-      <meshStandardMaterial color={props.color} emissive={props.color} emissiveIntensity={1.6} metalness={0.15} roughness={0.12} />
+      <sphereGeometry args={[0.08, 10, 10]} />
+      <meshStandardMaterial color={props.color} emissive={props.color} emissiveIntensity={1.5} metalness={0.15} roughness={0.12} />
     </mesh>
   );
 }
@@ -151,106 +303,40 @@ function IncidentBeacon({ incident }: { incident: Incident }) {
   );
 }
 
-function NeonRoads(props: ThreeElements["group"]) {
-  return (
-    <group {...props}>
-      {Array.from({ length: 7 }).map((_, index) => {
-        const z = -10 + index * 4;
-        return (
-          <mesh key={`h-${index}`} position={[0, 0.02, z]}>
-            <boxGeometry args={[34, 0.04, 0.16]} />
-            <meshStandardMaterial color="#49d3ff" emissive="#49d3ff" emissiveIntensity={1.55} />
-          </mesh>
-        );
-      })}
-      {Array.from({ length: 9 }).map((_, index) => {
-        const x = -16 + index * 4;
-        return (
-          <mesh key={`v-${index}`} position={[x, 0.02, 2.5]}>
-            <boxGeometry args={[0.16, 0.04, 24]} />
-            <meshStandardMaterial color="#8f7cff" emissive="#8f7cff" emissiveIntensity={1.15} />
-          </mesh>
-        );
-      })}
-    </group>
-  );
-}
+function CameraDirector({ snapshot, controlsRef, autoPausedUntilRef }: { snapshot: WorldSnapshot | null; controlsRef: RefObject<OrbitControlsImpl | null>; autoPausedUntilRef: MutableRefObject<number> }) {
+  const targetRef = useRef(new THREE.Vector3(0, 1.2, 1));
 
-function CameraDirector({ snapshot }: { snapshot: WorldSnapshot | null }) {
-  const { camera } = useThree();
-  const focusRef = useRef(new THREE.Vector3(0, 1.4, 0));
-  const camPosRef = useRef(new THREE.Vector3(18, 18, 21));
-
-  useFrame((state, delta) => {
-    if (!snapshot) {
+  useFrame((_, delta) => {
+    const controls = controlsRef.current;
+    if (!snapshot || !controls) {
       return;
     }
 
-    const activeIncidents = snapshot.incidents.filter((incident) => incident.status === "open" || incident.status === "in_progress");
-    const focusIncident =
-      activeIncidents.find((incident) => incident.id === snapshot.cinematicFocus) ??
-      activeIncidents.sort((a, b) => severityRank(b.severity) - severityRank(a.severity))[0];
+    if (performance.now() < autoPausedUntilRef.current) {
+      return;
+    }
 
-    const focus = focusIncident
-      ? new THREE.Vector3(focusIncident.position.x, 1.5, focusIncident.position.y)
-      : new THREE.Vector3(0, 1.2, 1);
+    const focus = getFocusPoint(snapshot);
+    targetRef.current.set(focus.x, 1.35, focus.y);
 
-    const orbit = state.clock.getElapsedTime() * 0.1;
-    const desiredPosition = new THREE.Vector3(
-      focus.x + Math.cos(orbit) * 14,
-      11.5 + Math.sin(orbit * 1.7) * 1.2,
-      focus.z + Math.sin(orbit) * 13
-    );
-
-    focusRef.current.lerp(focus, Math.min(1, delta * 2.4));
-    camPosRef.current.lerp(desiredPosition, Math.min(1, delta * 1.6));
-
-    camera.position.copy(camPosRef.current);
-    camera.lookAt(focusRef.current);
+    controls.target.lerp(targetRef.current, Math.min(1, delta * 1.85));
+    controls.update();
   });
 
   return null;
 }
 
-function severityRank(severity: Incident["severity"]): number {
-  if (severity === "high") {
-    return 3;
-  }
-  if (severity === "medium") {
-    return 2;
-  }
-  return 1;
-}
-
 export default function WorldScene({ snapshot }: Props) {
-  const buildings = useMemo<Building[]>(() => {
-    const list: Building[] = [];
-    const seed = snapshot?.worldSeed ?? 271828;
+  const focusPoint = useMemo(() => getFocusPoint(snapshot), [snapshot]);
 
-    for (let gx = -4; gx <= 4; gx += 1) {
-      for (let gz = -2; gz <= 4; gz += 1) {
-        if (Math.abs(gx) <= 1 && Math.abs(gz - 1) <= 1) {
-          continue;
-        }
-
-        const n = hashNumber(seed, gx, gz);
-        const n2 = hashNumber(seed + 1, gz, gx);
-
-        list.push({
-          x: gx * 4 + (n - 0.5) * 0.45,
-          z: gz * 4 + (n2 - 0.5) * 0.4,
-          width: 1.3 + n * 0.75,
-          depth: 1.3 + n2 * 0.68,
-          height: 1.7 + (0.4 + n * 0.6 + n2 * 0.7) * 4.7,
-          hue: 188 + Math.floor((n * 140) % 130)
-        });
-      }
-    }
-
-    return list;
-  }, [snapshot?.worldSeed]);
+  const streamedCity = useMemo(() => {
+    return buildStreamedCity(snapshot?.worldSeed ?? 271828, focusPoint);
+  }, [snapshot?.worldSeed, focusPoint.x, focusPoint.y]);
 
   const [trailMap, setTrailMap] = useState<Record<string, Array<[number, number, number]>>>({});
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const autoPausedUntilRef = useRef(0);
+  const userControllingRef = useRef(false);
 
   useEffect(() => {
     if (!snapshot) {
@@ -261,7 +347,7 @@ export default function WorldScene({ snapshot }: Props) {
       const next: Record<string, Array<[number, number, number]>> = { ...current };
       for (const agent of snapshot.agents) {
         const agentTrail = [...(next[agent.id] ?? []), toPathPoint(agent.position)];
-        next[agent.id] = agentTrail.slice(-54);
+        next[agent.id] = agentTrail.slice(-64);
       }
       return next;
     });
@@ -278,12 +364,12 @@ export default function WorldScene({ snapshot }: Props) {
   return (
     <Canvas
       shadows
-      dpr={[1, 1.9]}
-      camera={{ position: [18, 18, 21], fov: 46 }}
+      dpr={[1, 1.75]}
+      camera={{ position: [36, 24, 34], fov: 48 }}
       gl={{ antialias: true, powerPreference: "high-performance" }}
     >
       <color attach="background" args={["#080b15"]} />
-      <fog attach="fog" args={["#080b15", 20, 58]} />
+      <fog attach="fog" args={["#080b15", 80, 360]} />
 
       <ambientLight intensity={0.44} color="#8ea9ff" />
       <directionalLight
@@ -294,23 +380,26 @@ export default function WorldScene({ snapshot }: Props) {
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
       />
-      <spotLight position={[-14, 18, -8]} intensity={120} distance={80} angle={0.33} penumbra={0.7} color="#4ad8ff" />
+      <spotLight position={[-14, 18, -8]} intensity={120} distance={120} angle={0.33} penumbra={0.7} color="#4ad8ff" />
 
-      <Sky distance={1200} sunPosition={[110, 40, 70]} turbidity={8} rayleigh={0.4} mieCoefficient={0.004} mieDirectionalG={0.9} />
-      <Stars radius={120} depth={70} count={4000} factor={4.4} fade saturation={0} speed={1.1} />
+      <Sky distance={1800} sunPosition={[110, 40, 70]} turbidity={8} rayleigh={0.4} mieCoefficient={0.004} mieDirectionalG={0.9} />
+      <Stars radius={220} depth={120} count={7000} factor={4.5} fade saturation={0} speed={1.1} />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[80, 80, 1, 1]} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[focusPoint.x, 0, focusPoint.y]}>
+        <planeGeometry args={[700, 700, 1, 1]} />
         <meshStandardMaterial color="#0b1320" metalness={0.6} roughness={0.45} />
       </mesh>
 
-      <NeonRoads />
-      <TrafficLanes />
+      <DynamicRoads roads={streamedCity.roads} />
+      <TrafficLanes center={focusPoint} />
 
       {snapshot ? <DistrictOverlay snapshot={snapshot} /> : null}
 
-      {buildings.map((building) => (
-        <BuildingBlock key={`${building.x}-${building.z}`} building={building} />
+      {streamedCity.far.map((building) => (
+        <BuildingBlock key={`far-${building.x}-${building.z}`} building={building} />
+      ))}
+      {streamedCity.near.map((building) => (
+        <BuildingBlock key={`near-${building.x}-${building.z}`} building={building} />
       ))}
 
       {(snapshot?.incidents ?? [])
@@ -335,11 +424,11 @@ export default function WorldScene({ snapshot }: Props) {
         }
         const agent = snapshot?.agents.find((candidate) => candidate.id === agentId);
         const color = agent ? AGENT_COLORS[agent.role] : "#9ecbff";
-        return <Line key={agentId} points={points} color={color} lineWidth={1.55} transparent opacity={0.4} />;
+        return <Line key={agentId} points={points} color={color} lineWidth={1.4} transparent opacity={0.35} />;
       })}
 
       {(snapshot?.receipts ?? []).slice(-6).map((txHash, index) => (
-        <group key={txHash} position={[18, 0.8 + index * 1.1, -8]}>
+        <group key={txHash} position={[focusPoint.x + 28, 0.8 + index * 1.1, focusPoint.y - 14]}>
           <mesh>
             <torusGeometry args={[0.3, 0.08, 9, 22]} />
             <meshStandardMaterial color="#56ffd9" emissive="#56ffd9" emissiveIntensity={1.35} metalness={0.2} roughness={0.15} />
@@ -350,11 +439,32 @@ export default function WorldScene({ snapshot }: Props) {
         </group>
       ))}
 
-      <CameraDirector snapshot={snapshot} />
-      <OrbitControls maxDistance={46} minDistance={13} target={[0, 1, 2]} maxPolarAngle={Math.PI / 2.08} enablePan={false} />
+      <CameraDirector snapshot={snapshot} controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
+      <OrbitControls
+        ref={controlsRef}
+        makeDefault
+        enableDamping
+        dampingFactor={0.07}
+        minDistance={6}
+        maxDistance={220}
+        maxPolarAngle={Math.PI / 2.02}
+        onStart={() => {
+          userControllingRef.current = true;
+          autoPausedUntilRef.current = performance.now() + USER_CONTROL_PAUSE_MS;
+        }}
+        onChange={() => {
+          if (userControllingRef.current) {
+            autoPausedUntilRef.current = performance.now() + USER_CONTROL_PAUSE_MS;
+          }
+        }}
+        onEnd={() => {
+          userControllingRef.current = false;
+          autoPausedUntilRef.current = performance.now() + USER_CONTROL_PAUSE_MS;
+        }}
+      />
 
       <EffectComposer>
-        <Bloom intensity={1.2} luminanceThreshold={0.2} luminanceSmoothing={0.6} mipmapBlur />
+        <Bloom intensity={1.16} luminanceThreshold={0.2} luminanceSmoothing={0.58} mipmapBlur />
         <Noise opacity={0.03} />
         <Vignette offset={0.15} darkness={0.62} eskil={false} />
       </EffectComposer>
