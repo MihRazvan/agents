@@ -120,7 +120,7 @@ const agents: AgentRuntimeState[] = [
     target: hubPoint("scout"),
     path: [],
     energy: 1,
-    speed: 0.42
+    speed: 1.24
   },
   {
     id: "agent-planner-1",
@@ -132,7 +132,7 @@ const agents: AgentRuntimeState[] = [
     target: hubPoint("planner"),
     path: [],
     energy: 1,
-    speed: 0.38
+    speed: 1.04
   },
   {
     id: "agent-builder-1",
@@ -144,7 +144,7 @@ const agents: AgentRuntimeState[] = [
     target: hubPoint("builder"),
     path: [],
     energy: 1,
-    speed: 0.34
+    speed: 0.94
   },
   {
     id: "agent-builder-2",
@@ -156,7 +156,7 @@ const agents: AgentRuntimeState[] = [
     target: hubPoint("builder", { x: 12, y: 0 }),
     path: [],
     energy: 1,
-    speed: 0.32
+    speed: 0.9
   },
   {
     id: "agent-verifier-1",
@@ -168,7 +168,7 @@ const agents: AgentRuntimeState[] = [
     target: hubPoint("verifier"),
     path: [],
     energy: 1,
-    speed: 0.36
+    speed: 0.98
   },
   {
     id: "agent-publisher-1",
@@ -180,7 +180,7 @@ const agents: AgentRuntimeState[] = [
     target: hubPoint("publisher"),
     path: [],
     energy: 1,
-    speed: 0.4
+    speed: 1.08
   }
 ];
 
@@ -534,6 +534,10 @@ function findAgentsByRole(role: AgentRole): AgentRuntimeState[] {
     .sort((a, b) => b.trustScore - a.trustScore);
 }
 
+function findIdleAgentsByRole(role: AgentRole): AgentRuntimeState[] {
+  return findAgentsByRole(role).filter((agent) => agent.phase === "idle" && !agent.assignedIncidentId);
+}
+
 function roleHubPosition(role: AgentRole): Vec2 {
   return hubPoint(role);
 }
@@ -554,7 +558,8 @@ function setAgentIdle(agentId?: string): void {
 function allocateStageAgent(incident: Incident, workflow: IncidentWorkflow): AgentRuntimeState | null {
   const step = stageByIndex[workflow.stage];
   const preferred = findAgentsByRole(step.role);
-  const candidate = preferred.find((agent) => agent.trustScore >= TRUST_THRESHOLD) ?? null;
+  const available = findIdleAgentsByRole(step.role);
+  const candidate = available.find((agent) => agent.trustScore >= TRUST_THRESHOLD) ?? null;
 
   if (!candidate) {
     cinematicFocus = incident.id;
@@ -562,7 +567,10 @@ function allocateStageAgent(incident: Incident, workflow: IncidentWorkflow): Age
       incidentId: incident.id,
       requiredRole: step.role,
       threshold: TRUST_THRESHOLD,
-      availableAgents: preferred.map((agent) => ({ id: agent.id, trustScore: agent.trustScore }))
+      availableAgents: available.map((agent) => ({ id: agent.id, trustScore: agent.trustScore })),
+      busyAgents: preferred
+        .filter((agent) => !available.includes(agent))
+        .map((agent) => ({ id: agent.id, trustScore: agent.trustScore, phase: agent.phase, assignedIncidentId: agent.assignedIncidentId }))
     });
     return null;
   }
@@ -810,6 +818,11 @@ function processIncidents(): void {
     }
 
     if (!workflow.activeAgentId) {
+      const requiredRole = stageByIndex[workflow.stage].role;
+      const idleCandidates = findIdleAgentsByRole(requiredRole);
+      if (idleCandidates.length === 0) {
+        continue;
+      }
       const assigned = allocateStageAgent(incident, workflow);
       if (!assigned) {
         incident.retries += 1;
