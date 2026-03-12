@@ -290,6 +290,50 @@ body,
   background: rgba(12, 48, 36, 0.6);
 }
 
+.world-tag {
+  min-width: 180px;
+  max-width: 260px;
+  border: 1px solid rgba(132, 214, 255, 0.45);
+  border-radius: 8px;
+  background: rgba(8, 20, 36, 0.84);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(4px);
+  color: #dff1ff;
+  font-family: "IBM Plex Mono", monospace;
+  padding: 0.32rem 0.44rem;
+  line-height: 1.25;
+  pointer-events: none;
+}
+
+.world-tag p {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.world-tag span {
+  display: block;
+  margin-top: 0.18rem;
+  font-size: 0.64rem;
+  color: #a8c6e6;
+}
+
+.world-tag-hub {
+  border-color: rgba(160, 224, 255, 0.54);
+}
+
+.world-tag-district {
+  border-color: rgba(138, 232, 186, 0.52);
+}
+
+.world-tag-incident {
+  border-color: rgba(255, 196, 117, 0.62);
+}
+
+.world-tag-spine {
+  min-width: unset;
+  max-width: unset;
+}
+
 @media (max-width: 1200px) {
   .layout {
     grid-template-columns: 1fr;
