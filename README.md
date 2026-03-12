@@ -11,6 +11,10 @@ A vertical-slice implementation of a trust-gated autonomous multi-agent system w
 - DevSpot-style capability manifest written to `agent.json`.
 - Simulated ERC-8004 receipts (tx-hash-like outputs) for identity/validation/reputation events.
 - Live websocket stream into a 3D city scene with moving agents, incident beacons, trails, and receipt monuments.
+- Seeded procedural districts and A*-style route planning for agent movement.
+- Visual trust/task overlays: trust aura rings plus live handoff beams from agents to incidents.
+- Cinematic camera direction that auto-focuses high-priority incident activity.
+- Reactive world ambiance (district overlays, traffic motion, stronger post-processing pipeline).
 
 ## Monorepo layout
 

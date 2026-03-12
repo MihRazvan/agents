@@ -16,9 +16,11 @@ export interface AgentRuntimeState {
   phase: AgentPhase;
   position: Vec2;
   target: Vec2;
+  path: Vec2[];
   trustScore: number;
   assignedIncidentId?: string;
   energy: number;
+  speed: number;
 }
 
 export interface Incident {
@@ -33,15 +35,27 @@ export interface Incident {
   timeline: string[];
 }
 
+export interface District {
+  id: string;
+  name: string;
+  center: Vec2;
+  radius: number;
+  theme: "core" | "industrial" | "research" | "residential";
+  riskLevel: number;
+}
+
 export interface WorldSnapshot {
   timestamp: string;
   tick: number;
+  worldSeed: number;
   budget: {
     maxToolCalls: number;
     usedToolCalls: number;
     maxRetriesPerIncident: number;
     maxRuntimeSeconds: number;
   };
+  districts: District[];
+  cinematicFocus?: string;
   receipts: string[];
   agents: AgentRuntimeState[];
   incidents: Incident[];

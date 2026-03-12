@@ -149,6 +149,9 @@ export default function App() {
             <p className="budget-line">
               Tool budget: {snapshot?.budget.usedToolCalls ?? 0}/{snapshot?.budget.maxToolCalls ?? 0}
             </p>
+            <p className="budget-line">
+              World seed: {snapshot?.worldSeed ?? 0} | Districts: {snapshot?.districts.length ?? 0}
+            </p>
           </section>
 
           <section className="card manifest-card">
