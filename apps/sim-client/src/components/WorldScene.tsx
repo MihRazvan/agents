@@ -4,7 +4,7 @@ import { Float, Line, OrbitControls, Sky, Stars, Text } from "@react-three/drei"
 import { Canvas, useFrame } from "@react-three/fiber";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import * as THREE from "three";
-import { AGENT_COLORS, type Incident, type Vec2, type WorldSnapshot } from "@trust-city/shared";
+import { AGENT_COLORS, DISTRICT_THEME_PURPOSE, INCIDENT_ROUTING, ROLE_HUBS, type Incident, type Vec2, type WorldSnapshot } from "@trust-city/shared";
 import AnimatedAgentAvatar from "./AnimatedAgentAvatar";
 
 interface Props {
@@ -202,7 +202,9 @@ function DistrictOverlay({ snapshot }: { snapshot: WorldSnapshot }) {
   return (
     <group>
       {snapshot.districts.map((district) => {
+        const semantics = DISTRICT_THEME_PURPOSE[district.theme];
         const hue = district.theme === "core" ? "#59e4ff" : district.theme === "industrial" ? "#ff8f66" : district.theme === "research" ? "#89a0ff" : "#89ffb3";
+        const preferred = semantics.preferredCategories.map((category) => category.replace("_", " ")).join(" / ");
         return (
           <group key={district.id} position={[district.center.x, 0, district.center.y]}>
             <mesh rotation={[-Math.PI / 2, 0, 0]}>
@@ -212,9 +214,50 @@ function DistrictOverlay({ snapshot }: { snapshot: WorldSnapshot }) {
             <Text position={[0, 0.1, district.radius + 0.55]} fontSize={0.18} color="#daf3ff" anchorX="center" anchorY="middle">
               {district.name}
             </Text>
+            <Text position={[0, 0.1, district.radius + 1]} fontSize={0.12} color="#b8d9ff" anchorX="center" anchorY="middle" maxWidth={10}>
+              {semantics.purpose}
+            </Text>
+            <Text position={[0, 0.1, district.radius + 1.34]} fontSize={0.11} color="#95b6dd" anchorX="center" anchorY="middle">
+              {`Preferred: ${preferred}`}
+            </Text>
           </group>
         );
       })}
+    </group>
+  );
+}
+
+function RoleHubLandmarks() {
+  const hubs = useMemo(() => Object.entries(ROLE_HUBS), []);
+  const spinePoints = useMemo(() => hubs.map(([, hub]) => [hub.position.x, 0.09, hub.position.y] as [number, number, number]), [hubs]);
+
+  return (
+    <group>
+      {hubs.map(([role, hub]) => {
+        const color = AGENT_COLORS[role as keyof typeof AGENT_COLORS];
+        return (
+          <group key={role} position={[hub.position.x, 0, hub.position.y]}>
+            <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <ringGeometry args={[0.6, 0.9, 40]} />
+              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.3} transparent opacity={0.42} />
+            </mesh>
+            <mesh position={[0, 0.38, 0]}>
+              <cylinderGeometry args={[0.08, 0.14, 0.62, 12]} />
+              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.8} metalness={0.2} roughness={0.3} />
+            </mesh>
+            <Text position={[0, 0.95, 0]} fontSize={0.15} color="#ecf6ff" anchorX="center" anchorY="bottom">
+              {hub.name}
+            </Text>
+            <Text position={[0, 0.77, 0]} fontSize={0.11} color="#b9dcff" anchorX="center" anchorY="bottom" maxWidth={6}>
+              {hub.purpose}
+            </Text>
+          </group>
+        );
+      })}
+      {spinePoints.length > 1 ? <Line points={spinePoints} color="#6dc8ff" lineWidth={2} transparent opacity={0.42} /> : null}
+      <Text position={[-0.7, 0.22, ROLE_HUBS.builder.position.y - 1.7]} fontSize={0.14} color="#9ecfff" anchorX="center" anchorY="middle">
+        Operations Spine
+      </Text>
     </group>
   );
 }
@@ -269,6 +312,7 @@ function IncidentBeacon({ incident }: { incident: Incident }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const ringRef = useRef<THREE.Mesh>(null);
   const [x, y, z] = toWorldPoint(incident.position);
+  const routing = INCIDENT_ROUTING[incident.category];
 
   useFrame(({ clock }) => {
     const pulse = 1 + Math.sin(clock.getElapsedTime() * 3.3 + incident.position.x) * 0.15;
@@ -297,7 +341,10 @@ function IncidentBeacon({ incident }: { incident: Incident }) {
         <meshStandardMaterial color={tone} emissive={tone} emissiveIntensity={0.8} transparent opacity={0.85} />
       </mesh>
       <Text position={[0, 0.92, 0]} fontSize={0.14} color="#e9f5ff" anchorX="center" anchorY="bottom" maxWidth={4.5}>
-        {incident.category}
+        {routing.zoneName}
+      </Text>
+      <Text position={[0, 0.74, 0]} fontSize={0.11} color="#c5daef" anchorX="center" anchorY="bottom">
+        {incident.category.replace("_", " ")}
       </Text>
     </group>
   );
@@ -326,17 +373,142 @@ function CameraDirector({ snapshot, controlsRef, autoPausedUntilRef }: { snapsho
   return null;
 }
 
+function FreeRoamController({
+  controlsRef,
+  autoPausedUntilRef
+}: {
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  autoPausedUntilRef: MutableRefObject<number>;
+}) {
+  const keysRef = useRef<Record<string, boolean>>({});
+  const velocityRef = useRef(new THREE.Vector3());
+  const forwardRef = useRef(new THREE.Vector3());
+  const rightRef = useRef(new THREE.Vector3());
+  const upRef = useRef(new THREE.Vector3(0, 1, 0));
+  const desiredVelocityRef = useRef(new THREE.Vector3());
+  const stepRef = useRef(new THREE.Vector3());
+
+  useEffect(() => {
+    const movementKeys = new Set(["w", "a", "s", "d", "q", "e", "arrowup", "arrowdown", "arrowleft", "arrowright"]);
+    const down = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (movementKeys.has(key)) {
+        event.preventDefault();
+      }
+      keysRef.current[key] = true;
+    };
+    const up = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (movementKeys.has(key)) {
+        event.preventDefault();
+      }
+      keysRef.current[key] = false;
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, []);
+
+  useFrame((_, delta) => {
+    const controls = controlsRef.current;
+    if (!controls) {
+      return;
+    }
+
+    const keys = keysRef.current;
+    const forwardInput = (keys["w"] || keys["arrowup"] ? 1 : 0) - (keys["s"] || keys["arrowdown"] ? 1 : 0);
+    const strafeInput = (keys["d"] || keys["arrowright"] ? 1 : 0) - (keys["a"] || keys["arrowleft"] ? 1 : 0);
+    const verticalInput = (keys["e"] ? 1 : 0) - (keys["q"] ? 1 : 0);
+    const hasInput = forwardInput !== 0 || strafeInput !== 0 || verticalInput !== 0;
+
+    const speed = (keys["shift"] ? 36 : 16) * (keys["control"] ? 0.35 : 1);
+    const forward = forwardRef.current;
+    controls.object.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+
+    const right = rightRef.current;
+    right.crossVectors(forward, upRef.current).normalize();
+
+    const desiredVelocity = desiredVelocityRef.current;
+    desiredVelocity.set(0, 0, 0);
+    desiredVelocity.addScaledVector(forward, forwardInput * speed);
+    desiredVelocity.addScaledVector(right, strafeInput * speed);
+    desiredVelocity.addScaledVector(upRef.current, verticalInput * speed * 0.8);
+
+    const blend = 1 - Math.exp(-delta * 10);
+    velocityRef.current.lerp(desiredVelocity, blend);
+
+    if (!hasInput && velocityRef.current.lengthSq() < 0.001) {
+      return;
+    }
+
+    const step = stepRef.current.copy(velocityRef.current).multiplyScalar(delta);
+    controls.object.position.add(step);
+    controls.target.add(step);
+    controls.update();
+
+    if (hasInput) {
+      autoPausedUntilRef.current = performance.now() + USER_CONTROL_PAUSE_MS;
+    }
+  });
+
+  return null;
+}
+
+function StreamAnchorController({
+  controlsRef,
+  onAnchorChunkChange
+}: {
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  onAnchorChunkChange: (anchor: Vec2) => void;
+}) {
+  const chunkRef = useRef<string>("");
+
+  useFrame(() => {
+    const controls = controlsRef.current;
+    if (!controls) {
+      return;
+    }
+
+    const position = controls.object.position;
+    const chunkX = Math.round(position.x / CHUNK_SIZE);
+    const chunkZ = Math.round(position.z / CHUNK_SIZE);
+    const chunkKey = `${chunkX}:${chunkZ}`;
+
+    if (chunkKey !== chunkRef.current) {
+      chunkRef.current = chunkKey;
+      onAnchorChunkChange({ x: chunkX * CHUNK_SIZE, y: chunkZ * CHUNK_SIZE });
+    }
+  });
+
+  return null;
+}
+
 export default function WorldScene({ snapshot }: Props) {
   const focusPoint = useMemo(() => getFocusPoint(snapshot), [snapshot]);
-
-  const streamedCity = useMemo(() => {
-    return buildStreamedCity(snapshot?.worldSeed ?? 271828, focusPoint);
-  }, [snapshot?.worldSeed, focusPoint.x, focusPoint.y]);
-
-  const [trailMap, setTrailMap] = useState<Record<string, Array<[number, number, number]>>>({});
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const autoPausedUntilRef = useRef(0);
   const userControllingRef = useRef(false);
+  const [streamAnchor, setStreamAnchor] = useState<Vec2>(focusPoint);
+
+  useEffect(() => {
+    setStreamAnchor((current) => {
+      if (Math.hypot(current.x - focusPoint.x, current.y - focusPoint.y) < CHUNK_SIZE) {
+        return focusPoint;
+      }
+      return current;
+    });
+  }, [focusPoint.x, focusPoint.y]);
+
+  const streamedCity = useMemo(() => {
+    return buildStreamedCity(snapshot?.worldSeed ?? 271828, streamAnchor);
+  }, [snapshot?.worldSeed, streamAnchor.x, streamAnchor.y]);
+
+  const [trailMap, setTrailMap] = useState<Record<string, Array<[number, number, number]>>>({});
 
   useEffect(() => {
     if (!snapshot) {
@@ -385,15 +557,16 @@ export default function WorldScene({ snapshot }: Props) {
       <Sky distance={1800} sunPosition={[110, 40, 70]} turbidity={8} rayleigh={0.4} mieCoefficient={0.004} mieDirectionalG={0.9} />
       <Stars radius={220} depth={120} count={7000} factor={4.5} fade saturation={0} speed={1.1} />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[focusPoint.x, 0, focusPoint.y]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[streamAnchor.x, 0, streamAnchor.y]}>
         <planeGeometry args={[700, 700, 1, 1]} />
         <meshStandardMaterial color="#0b1320" metalness={0.6} roughness={0.45} />
       </mesh>
 
       <DynamicRoads roads={streamedCity.roads} />
-      <TrafficLanes center={focusPoint} />
+      <TrafficLanes center={streamAnchor} />
 
       {snapshot ? <DistrictOverlay snapshot={snapshot} /> : null}
+      <RoleHubLandmarks />
 
       {streamedCity.far.map((building) => (
         <BuildingBlock key={`far-${building.x}-${building.z}`} building={building} />
@@ -440,11 +613,16 @@ export default function WorldScene({ snapshot }: Props) {
       ))}
 
       <CameraDirector snapshot={snapshot} controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
+      <FreeRoamController controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
+      <StreamAnchorController controlsRef={controlsRef} onAnchorChunkChange={setStreamAnchor} />
       <OrbitControls
         ref={controlsRef}
         makeDefault
         enableDamping
         dampingFactor={0.07}
+        enablePan
+        zoomSpeed={1.12}
+        rotateSpeed={0.74}
         minDistance={6}
         maxDistance={220}
         maxPolarAngle={Math.PI / 2.02}

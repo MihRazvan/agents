@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AgentManifest, LogEntry, WorldSnapshot, WsMessage } from "@trust-city/shared";
+import { INCIDENT_ROUTING, ROLE_HUBS, type AgentManifest, type LogEntry, type WorldSnapshot, type WsMessage } from "@trust-city/shared";
 import WorldScene from "./components/WorldScene";
 
 const httpBase = import.meta.env.VITE_ORCHESTRATOR_HTTP ?? "http://localhost:8787";
@@ -14,6 +14,10 @@ function shortHash(hash: string): string {
     return hash;
   }
   return `${hash.slice(0, 8)}...${hash.slice(-6)}`;
+}
+
+function formatCategory(category: string): string {
+  return category.replace(/_/g, " ");
 }
 
 export default function App() {
@@ -107,6 +111,16 @@ export default function App() {
     };
   }, [snapshot]);
 
+  const incidentsById = useMemo(() => {
+    const map = new Map<string, { category: string }>();
+    for (const incident of snapshot?.incidents ?? []) {
+      map.set(incident.id, {
+        category: incident.category
+      });
+    }
+    return map;
+  }, [snapshot]);
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -175,10 +189,12 @@ export default function App() {
                   <div>
                     <p className="agent-name">{agent.name}</p>
                     <p className="agent-phase">{formatPhase(agent.phase)}</p>
+                    <p className="agent-home">{`Base: ${ROLE_HUBS[agent.role].name}`}</p>
                   </div>
                   <div className="agent-meta">
                     <p>Trust {agent.trustScore.toFixed(2)}</p>
                     <p>Energy {(agent.energy * 100).toFixed(0)}%</p>
+                    <p>{agent.assignedIncidentId ? `On ${formatCategory(incidentsById.get(agent.assignedIncidentId)?.category ?? "task")}` : "At base"}</p>
                   </div>
                 </div>
               ))}
@@ -203,6 +219,50 @@ export default function App() {
                 </p>
               ))}
             </div>
+          </section>
+
+          <section className="card manifest-card">
+            <h2>City Logic</h2>
+            <p className="manifest-item">
+              <span>Scout Hub:</span> {ROLE_HUBS.scout.name} discovers incidents.
+            </p>
+            <p className="manifest-item">
+              <span>Planning Hub:</span> {ROLE_HUBS.planner.name} creates strategy.
+            </p>
+            <p className="manifest-item">
+              <span>Execution Hub:</span> {ROLE_HUBS.builder.name} runs fixes.
+            </p>
+            <p className="manifest-item">
+              <span>Verification Hub:</span> {ROLE_HUBS.verifier.name} quality-gates output.
+            </p>
+            <p className="manifest-item">
+              <span>Publishing Hub:</span> {ROLE_HUBS.publisher.name} emits receipts.
+            </p>
+            <p className="manifest-item">
+              <span>CI Routing:</span> {INCIDENT_ROUTING.ci_failure.zoneName}
+            </p>
+            <p className="manifest-item">
+              <span>Security Routing:</span> {INCIDENT_ROUTING.security_vuln.zoneName}
+            </p>
+            <p className="manifest-item">
+              <span>API Routing:</span> {INCIDENT_ROUTING.api_regression.zoneName}
+            </p>
+          </section>
+
+          <section className="card manifest-card">
+            <h2>World Controls</h2>
+            <p className="manifest-item">
+              <span>Move:</span> WASD / Arrow Keys
+            </p>
+            <p className="manifest-item">
+              <span>Up/Down:</span> Q / E
+            </p>
+            <p className="manifest-item">
+              <span>Speed:</span> Shift sprint, Ctrl precision
+            </p>
+            <p className="manifest-item">
+              <span>Mouse:</span> Orbit / Pan + Wheel zoom
+            </p>
           </section>
         </aside>
       </main>

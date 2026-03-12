@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import {
   AGENT_COLORS,
+  INCIDENT_ROUTING,
+  ROLE_HUBS,
   type AgentManifest,
   type AgentPhase,
   type AgentRole,
@@ -96,6 +98,13 @@ const stageByIndex: Array<{ key: AgentPhase; role: AgentRole; label: string }> =
 const rng = mulberry32(WORLD_SEED);
 const districts = buildDistricts();
 
+function hubPoint(role: AgentRole, offset?: Vec2): Vec2 {
+  return {
+    x: ROLE_HUBS[role].position.x + (offset?.x ?? 0),
+    y: ROLE_HUBS[role].position.y + (offset?.y ?? 0)
+  };
+}
+
 const agents: AgentRuntimeState[] = [
   {
     id: "agent-scout-1",
@@ -103,8 +112,8 @@ const agents: AgentRuntimeState[] = [
     role: "scout",
     phase: "idle",
     trustScore: 0.91,
-    position: { x: -14, y: -10 },
-    target: { x: -14, y: -10 },
+    position: hubPoint("scout"),
+    target: hubPoint("scout"),
     path: [],
     energy: 1,
     speed: 0.42
@@ -115,8 +124,8 @@ const agents: AgentRuntimeState[] = [
     role: "planner",
     phase: "idle",
     trustScore: 0.87,
-    position: { x: -6, y: -11 },
-    target: { x: -6, y: -11 },
+    position: hubPoint("planner", { x: 0, y: -1 }),
+    target: hubPoint("planner", { x: 0, y: -1 }),
     path: [],
     energy: 1,
     speed: 0.38
@@ -127,8 +136,8 @@ const agents: AgentRuntimeState[] = [
     role: "builder",
     phase: "idle",
     trustScore: 0.74,
-    position: { x: 0, y: -11 },
-    target: { x: 0, y: -11 },
+    position: hubPoint("builder", { x: -1, y: -1 }),
+    target: hubPoint("builder", { x: -1, y: -1 }),
     path: [],
     energy: 1,
     speed: 0.34
@@ -139,8 +148,8 @@ const agents: AgentRuntimeState[] = [
     role: "builder",
     phase: "idle",
     trustScore: 0.63,
-    position: { x: 4, y: -10 },
-    target: { x: 4, y: -10 },
+    position: hubPoint("builder", { x: 2, y: 0 }),
+    target: hubPoint("builder", { x: 2, y: 0 }),
     path: [],
     energy: 1,
     speed: 0.32
@@ -151,8 +160,8 @@ const agents: AgentRuntimeState[] = [
     role: "verifier",
     phase: "idle",
     trustScore: 0.89,
-    position: { x: 8, y: -10 },
-    target: { x: 8, y: -10 },
+    position: hubPoint("verifier"),
+    target: hubPoint("verifier"),
     path: [],
     energy: 1,
     speed: 0.36
@@ -163,8 +172,8 @@ const agents: AgentRuntimeState[] = [
     role: "publisher",
     phase: "idle",
     trustScore: 0.9,
-    position: { x: 12, y: -10 },
-    target: { x: 12, y: -10 },
+    position: hubPoint("publisher"),
+    target: hubPoint("publisher"),
     path: [],
     energy: 1,
     speed: 0.4
@@ -506,19 +515,7 @@ function findAgentsByRole(role: AgentRole): AgentRuntimeState[] {
 }
 
 function roleHubPosition(role: AgentRole): Vec2 {
-  if (role === "scout") {
-    return { x: -14, y: -10 };
-  }
-  if (role === "planner") {
-    return { x: -6, y: -10 };
-  }
-  if (role === "builder") {
-    return { x: 1, y: -10 };
-  }
-  if (role === "verifier") {
-    return { x: 8, y: -10 };
-  }
-  return { x: 12, y: -10 };
+  return hubPoint(role);
 }
 
 function setAgentIdle(agentId?: string): void {
@@ -697,26 +694,33 @@ function tickMovement(): void {
   }
 }
 
-function pickDistrictCenter(): Vec2 {
-  const weighted = districts
+function pickDistrictForCategory(category: Incident["category"]): District {
+  const preferredThemes = INCIDENT_ROUTING[category].preferredThemes;
+  const pool = districts.filter((district) => preferredThemes.includes(district.theme));
+
+  const weightedPool = (pool.length > 0 ? pool : districts)
     .map((district) => ({
       district,
-      weight: 0.8 + district.riskLevel
+      weight: 0.7 + district.riskLevel
     }))
     .sort((a, b) => b.weight - a.weight);
 
-  const index = Math.floor(rng() * Math.min(3, weighted.length));
-  return weighted[index]?.district.center ?? { x: 0, y: 0 };
+  const index = Math.floor(rng() * Math.min(2, weightedPool.length));
+  return weightedPool[index]?.district ?? districts[0];
 }
 
-function randomIncidentPosition(): Vec2 {
-  const center = pickDistrictCenter();
+function randomIncidentPosition(category: Incident["category"]): { position: Vec2; district: District } {
+  const district = pickDistrictForCategory(category);
+  const center = district.center;
   const spread = 2 + rng() * 2.6;
   const candidate = {
     x: center.x + (rng() * 2 - 1) * spread,
     y: center.y + (rng() * 2 - 1) * spread
   };
-  return ensureWalkable(candidate);
+  return {
+    position: ensureWalkable(candidate),
+    district
+  };
 }
 
 function spawnIncident(): Incident {
@@ -724,6 +728,8 @@ function spawnIncident(): Incident {
   const severities: Incident["severity"][] = ["low", "medium", "high"];
   const category = categories[Math.floor(rng() * categories.length)];
   const severity = severities[Math.floor(rng() * severities.length)];
+  const routed = randomIncidentPosition(category);
+  const routing = INCIDENT_ROUTING[category];
 
   const incident: Incident = {
     id: `incident-${randomUUID().slice(0, 8)}`,
@@ -736,7 +742,7 @@ function spawnIncident(): Incident {
     category,
     severity,
     status: "open",
-    position: randomIncidentPosition(),
+    position: routed.position,
     retries: 0,
     timeline: []
   };
@@ -749,7 +755,10 @@ function spawnIncident(): Incident {
     incidentId: incident.id,
     category,
     severity,
-    position: incident.position
+    position: incident.position,
+    district: routed.district.name,
+    zone: routing.zoneName,
+    rationale: routing.rationale
   });
 
   broadcast({ type: "incident_spawned", payload: incident });
