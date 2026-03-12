@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { Float, Line, OrbitControls, Sky, Stars, Text } from "@react-three/drei";
 import { Canvas, type ThreeElements, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { AGENT_COLORS, type AgentRuntimeState, type Incident, type Vec2, type WorldSnapshot } from "@trust-city/shared";
+import AnimatedAgentAvatar from "./AnimatedAgentAvatar";
 
 interface Props {
   snapshot: WorldSnapshot | null;
@@ -109,112 +110,6 @@ function TrafficNode(props: { lane: "h" | "v"; offset: number; speed: number; sp
       <sphereGeometry args={[0.09, 10, 10]} />
       <meshStandardMaterial color={props.color} emissive={props.color} emissiveIntensity={1.6} metalness={0.15} roughness={0.12} />
     </mesh>
-  );
-}
-
-function AgentAvatar({ agent, incident }: { agent: AgentRuntimeState; incident?: Incident }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const leftArmRef = useRef<THREE.Mesh>(null);
-  const rightArmRef = useRef<THREE.Mesh>(null);
-  const leftLegRef = useRef<THREE.Mesh>(null);
-  const rightLegRef = useRef<THREE.Mesh>(null);
-  const auraRef = useRef<THREE.Mesh>(null);
-
-  const [x, y, z] = toWorldPoint(agent.position);
-  const color = AGENT_COLORS[agent.role];
-  const moving = agent.path.length > 0;
-  const phaseIntensity =
-    agent.phase === "execute"
-      ? 1.1
-      : agent.phase === "verify"
-        ? 0.92
-        : agent.phase === "plan"
-          ? 0.75
-          : agent.phase === "submit"
-            ? 0.85
-            : 0.55;
-
-  useFrame(({ clock }, delta) => {
-    if (!groupRef.current) {
-      return;
-    }
-
-    const beat = clock.getElapsedTime() * (moving ? 9.5 : 4) * phaseIntensity;
-    const swing = moving ? 0.58 : 0.12;
-
-    if (leftArmRef.current && rightArmRef.current && leftLegRef.current && rightLegRef.current) {
-      leftArmRef.current.rotation.x = Math.sin(beat) * swing;
-      rightArmRef.current.rotation.x = Math.sin(beat + Math.PI) * swing;
-      leftLegRef.current.rotation.x = Math.sin(beat + Math.PI) * swing * 0.78;
-      rightLegRef.current.rotation.x = Math.sin(beat) * swing * 0.78;
-    }
-
-    if (auraRef.current) {
-      const pulse = 0.86 + Math.sin(clock.getElapsedTime() * (2.4 + phaseIntensity)) * 0.12;
-      auraRef.current.scale.set(pulse + agent.trustScore * 0.5, pulse + agent.trustScore * 0.5, 1);
-    }
-
-    const targetYaw = Math.atan2(agent.target.x - agent.position.x, agent.target.y - agent.position.y);
-    groupRef.current.rotation.y = THREE.MathUtils.damp(groupRef.current.rotation.y, targetYaw, 7, delta);
-    groupRef.current.position.y = y + Math.sin(clock.getElapsedTime() * 4.6 + agent.position.x) * 0.03;
-  });
-
-  return (
-    <group ref={groupRef} position={[x, y, z]}>
-      <mesh ref={auraRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.58, 0]}>
-        <ringGeometry args={[0.42, 0.54, 32]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.25} transparent opacity={0.35 + agent.trustScore * 0.2} />
-      </mesh>
-
-      <mesh castShadow>
-        <capsuleGeometry args={[0.24, 0.45, 4, 12]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.72} metalness={0.2} roughness={0.2} />
-      </mesh>
-
-      <mesh position={[0, 0.55, 0]} castShadow>
-        <sphereGeometry args={[0.18, 16, 16]} />
-        <meshStandardMaterial color="#dfe8ff" emissive={color} emissiveIntensity={0.35} metalness={0.1} roughness={0.2} />
-      </mesh>
-
-      <mesh ref={leftArmRef} position={[-0.28, 0.15, 0]} castShadow>
-        <capsuleGeometry args={[0.06, 0.28, 4, 8]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.42} />
-      </mesh>
-      <mesh ref={rightArmRef} position={[0.28, 0.15, 0]} castShadow>
-        <capsuleGeometry args={[0.06, 0.28, 4, 8]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.42} />
-      </mesh>
-
-      <mesh ref={leftLegRef} position={[-0.11, -0.38, 0]} castShadow>
-        <capsuleGeometry args={[0.065, 0.3, 4, 8]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.28} />
-      </mesh>
-      <mesh ref={rightLegRef} position={[0.11, -0.38, 0]} castShadow>
-        <capsuleGeometry args={[0.065, 0.3, 4, 8]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.28} />
-      </mesh>
-
-      {incident ? (
-        <Line
-          points={[
-            [0, 0.32, 0],
-            [incident.position.x - agent.position.x, 0.3, incident.position.y - agent.position.y]
-          ]}
-          color={color}
-          dashed
-          dashScale={2}
-          dashSize={0.4}
-          gapSize={0.22}
-          transparent
-          opacity={0.5}
-          lineWidth={1.2}
-        />
-      ) : null}
-
-      <Text position={[0, 1.02, 0]} fontSize={0.15} color="#e8f1ff" anchorX="center" anchorY="bottom" maxWidth={4}>
-        {agent.name}
-      </Text>
-    </group>
   );
 }
 
@@ -424,9 +319,15 @@ export default function WorldScene({ snapshot }: Props) {
           <IncidentBeacon key={incident.id} incident={incident} />
         ))}
 
-      {(snapshot?.agents ?? []).map((agent) => (
-        <AgentAvatar key={agent.id} agent={agent} incident={agent.assignedIncidentId ? incidentsById.get(agent.assignedIncidentId) : undefined} />
-      ))}
+      <Suspense fallback={null}>
+        {(snapshot?.agents ?? []).map((agent) => (
+          <AnimatedAgentAvatar
+            key={agent.id}
+            agent={agent}
+            incident={agent.assignedIncidentId ? incidentsById.get(agent.assignedIncidentId) : undefined}
+          />
+        ))}
+      </Suspense>
 
       {Object.entries(trailMap).map(([agentId, points]) => {
         if (points.length < 2) {

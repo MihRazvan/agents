@@ -15,6 +15,7 @@ A vertical-slice implementation of a trust-gated autonomous multi-agent system w
 - Visual trust/task overlays: trust aura rings plus live handoff beams from agents to incidents.
 - Cinematic camera direction that auto-focuses high-priority incident activity.
 - Reactive world ambiance (district overlays, traffic motion, stronger post-processing pipeline).
+- Real skinned GLB avatars (`RobotExpressive.glb`) with clip-driven phase animation (`Idle`, `Walking`, `Running`) and smooth transitions.
 
 ## Monorepo layout
 
