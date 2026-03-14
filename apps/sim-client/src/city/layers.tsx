@@ -2,7 +2,7 @@ import { useMemo, useRef } from "react";
 import { Float, Html, Line } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { AGENT_COLORS, DISTRICT_THEME_PURPOSE, INCIDENT_ROUTING, ROLE_HUBS, type Incident, type Vec2, type WorldSnapshot } from "@trust-city/shared";
+import { AGENT_COLORS, DISTRICT_THEME_PURPOSE, JOB_ROUTING, ROLE_HUBS, type Job, type PluginAgentRecord, type Vec2, type WorldSnapshot } from "@trust-city/shared";
 import { ROAD_MINOR_SPACING, type CityStructure, type RoadLine } from "./generator";
 
 function toWorldPoint(position: Vec2, y = 0.72): [number, number, number] {
@@ -136,7 +136,7 @@ export function DistrictOverlay({ snapshot }: { snapshot: WorldSnapshot }) {
       {snapshot.districts.map((district) => {
         const semantics = DISTRICT_THEME_PURPOSE[district.theme];
         const hue = district.theme === "core" ? "#59e4ff" : district.theme === "industrial" ? "#ff8f66" : district.theme === "research" ? "#89a0ff" : "#89ffb3";
-        const preferred = semantics.preferredCategories.map((category) => category.replace("_", " ")).join(", ");
+        const preferred = semantics.preferredCategories.map((category) => JOB_ROUTING[category].label).join(", ");
         return (
           <group key={district.id} position={[district.center.x, 0, district.center.y]}>
             <mesh rotation={[-Math.PI / 2, 0, 0]}>
@@ -146,7 +146,8 @@ export function DistrictOverlay({ snapshot }: { snapshot: WorldSnapshot }) {
             <Html position={[0, 0.24, district.radius + 0.86]} center>
               <div className="world-tag world-tag-district">
                 <p>{district.name}</p>
-                <span>{`Preferred incidents: ${preferred}`}</span>
+                <span>{semantics.purpose}</span>
+                <span>{`Best for: ${preferred}`}</span>
               </div>
             </Html>
           </group>
@@ -184,11 +185,42 @@ export function RoleHubLandmarks() {
         );
       })}
       {spinePoints.length > 1 ? <Line points={spinePoints} color="#6dc8ff" lineWidth={2} transparent opacity={0.42} /> : null}
-      <Html position={[-0.7, 0.32, ROLE_HUBS.builder.position.y - 1.7]} center>
+      <Html position={[24, 0.32, -18]} center>
         <div className="world-tag world-tag-spine">
-          <p>Operations Spine</p>
+          <p>Marketplace Spine</p>
         </div>
       </Html>
+    </group>
+  );
+}
+
+export function PluginRegistryBoard({ plugins }: { plugins: PluginAgentRecord[] }) {
+  const active = plugins.filter((plugin) => plugin.status === "active");
+  const rejected = plugins.filter((plugin) => plugin.status === "rejected");
+
+  return (
+    <group position={[ROLE_HUBS.scout.position.x + 8, 0, ROLE_HUBS.scout.position.y + 8]}>
+      <mesh position={[0, 0.8, 0]}>
+        <boxGeometry args={[3.2, 1.5, 0.18]} />
+        <meshStandardMaterial color="#0d1c30" emissive="#163555" emissiveIntensity={0.34} metalness={0.2} roughness={0.45} />
+      </mesh>
+      <Html position={[0, 1.68, 0]} center>
+        <div className="world-tag world-tag-plugin">
+          <p>Plugin Registry</p>
+          <span>{`${active.length} active | ${rejected.length} rejected`}</span>
+        </div>
+      </Html>
+      {plugins.slice(0, 4).map((plugin, index) => {
+        const tone = plugin.status === "active" ? "#7dffb1" : "#ff7d7d";
+        return (
+          <group key={plugin.id} position={[-1.1 + index * 0.75, 0.26, 0.42]}>
+            <mesh>
+              <cylinderGeometry args={[0.12, 0.12, 0.4, 10]} />
+              <meshStandardMaterial color={tone} emissive={tone} emissiveIntensity={0.88} />
+            </mesh>
+          </group>
+        );
+      })}
     </group>
   );
 }
@@ -243,14 +275,14 @@ function TrafficNode(props: { lane: "h" | "v"; laneOffset: number; offset: numbe
   );
 }
 
-export function IncidentBeacon({ incident }: { incident: Incident }) {
+export function JobBeacon({ job }: { job: Job }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const ringRef = useRef<THREE.Mesh>(null);
-  const [x, y, z] = toWorldPoint(incident.position);
-  const routing = INCIDENT_ROUTING[incident.category];
+  const [x, y, z] = toWorldPoint(job.position);
+  const routing = JOB_ROUTING[job.category];
 
   useFrame(({ clock }) => {
-    const pulse = 1 + Math.sin(clock.getElapsedTime() * 3.3 + incident.position.x) * 0.15;
+    const pulse = 1 + Math.sin(clock.getElapsedTime() * 3.3 + job.position.x) * 0.15;
     if (meshRef.current) {
       meshRef.current.scale.setScalar(pulse);
     }
@@ -261,7 +293,7 @@ export function IncidentBeacon({ incident }: { incident: Incident }) {
     }
   });
 
-  const tone = incident.severity === "high" ? "#ff4e4e" : incident.severity === "medium" ? "#ffb454" : "#6fe78b";
+  const tone = job.priority === "critical" ? "#ff4e4e" : job.priority === "priority" ? "#ffb454" : "#6fe78b";
 
   return (
     <group position={[x, y, z]}>
@@ -276,9 +308,10 @@ export function IncidentBeacon({ incident }: { incident: Incident }) {
         <meshStandardMaterial color={tone} emissive={tone} emissiveIntensity={0.8} transparent opacity={0.85} />
       </mesh>
       <Html position={[0, 1.05, 0]} center>
-        <div className="world-tag world-tag-incident">
-          <p>{routing.zoneName}</p>
-          <span>{incident.category.replace("_", " ")}</span>
+        <div className="world-tag world-tag-job">
+          <p>{job.title}</p>
+          <span>{routing.zoneName}</span>
+          <span>{`${routing.label} | ${job.submitter}`}</span>
         </div>
       </Html>
     </group>

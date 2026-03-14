@@ -325,8 +325,25 @@ body,
   border-color: rgba(138, 232, 186, 0.52);
 }
 
-.world-tag-incident {
+.world-tag-job {
   border-color: rgba(255, 196, 117, 0.62);
+}
+
+.world-tag-plugin {
+  border-color: rgba(125, 255, 177, 0.52);
+}
+
+.world-tag-chat {
+  min-width: 150px;
+  max-width: 220px;
+}
+
+.world-tag-chat-decision {
+  border-color: rgba(125, 255, 177, 0.52);
+}
+
+.world-tag-chat-warning {
+  border-color: rgba(255, 125, 125, 0.58);
 }
 
 .world-tag-spine {

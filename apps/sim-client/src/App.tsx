@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { INCIDENT_ROUTING, ROLE_HUBS, type AgentManifest, type LogEntry, type WorldSnapshot, type WsMessage } from "@trust-city/shared";
+import { JOB_ROUTING, ROLE_HUBS, type AgentManifest, type LogEntry, type PluginAgentRecord, type WorldSnapshot, type WsMessage } from "@trust-city/shared";
 import WorldScene from "./components/WorldScene";
 
 const httpBase = import.meta.env.VITE_ORCHESTRATOR_HTTP ?? "http://localhost:8787";
@@ -16,8 +16,8 @@ function shortHash(hash: string): string {
   return `${hash.slice(0, 8)}...${hash.slice(-6)}`;
 }
 
-function formatCategory(category: string): string {
-  return category.replace(/_/g, " ");
+function formatStatus(status: string): string {
+  return status.replace(/_/g, " ");
 }
 
 export default function App() {
@@ -25,24 +25,32 @@ export default function App() {
   const [manifest, setManifest] = useState<AgentManifest | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [receipts, setReceipts] = useState<string[]>([]);
+  const [plugins, setPlugins] = useState<PluginAgentRecord[]>([]);
   const [wsStatus, setWsStatus] = useState<"connecting" | "live" | "offline">("connecting");
 
   useEffect(() => {
     const controller = new AbortController();
 
-    async function loadManifest(): Promise<void> {
+    async function loadBootData(): Promise<void> {
       try {
-        const response = await fetch(`${httpBase}/agent.json`, { signal: controller.signal });
-        if (response.ok) {
-          setManifest((await response.json()) as AgentManifest);
+        const [manifestResponse, pluginResponse] = await Promise.all([
+          fetch(`${httpBase}/agent.json`, { signal: controller.signal }),
+          fetch(`${httpBase}/plugins`, { signal: controller.signal })
+        ]);
+
+        if (manifestResponse.ok) {
+          setManifest((await manifestResponse.json()) as AgentManifest);
+        }
+
+        if (pluginResponse.ok) {
+          setPlugins((await pluginResponse.json()) as PluginAgentRecord[]);
         }
       } catch {
         // ignore boot race while orchestrator starts
       }
     }
 
-    void loadManifest();
-
+    void loadBootData();
     return () => controller.abort();
   }, []);
 
@@ -65,6 +73,7 @@ export default function App() {
           const incoming = message.payload as WorldSnapshot;
           setSnapshot(incoming);
           setReceipts(incoming.receipts.slice(-10).reverse());
+          setPlugins(incoming.pluginAgents);
         }
 
         if (message.type === "log_entry") {
@@ -75,8 +84,13 @@ export default function App() {
         if (message.type === "receipt") {
           const payload = message.payload as { txHash?: string };
           if (payload.txHash) {
-            setReceipts((current) => [payload.txHash!, ...current].slice(0, 10));
+            setReceipts((current) => [payload.txHash, ...current].filter((entry): entry is string => Boolean(entry)).slice(0, 10));
           }
+        }
+
+        if (message.type === "plugin_registered") {
+          const incoming = message.payload as PluginAgentRecord;
+          setPlugins((current) => [incoming, ...current.filter((entry) => entry.id !== incoming.id)]);
         }
       };
 
@@ -100,33 +114,39 @@ export default function App() {
     };
   }, []);
 
-  const incidentStats = useMemo(() => {
+  const jobStats = useMemo(() => {
     if (!snapshot) {
-      return { open: 0, resolved: 0, failed: 0 };
+      return { live: 0, completed: 0, failed: 0 };
     }
+
     return {
-      open: snapshot.incidents.filter((incident) => incident.status === "open" || incident.status === "in_progress").length,
-      resolved: snapshot.incidents.filter((incident) => incident.status === "resolved").length,
-      failed: snapshot.incidents.filter((incident) => incident.status === "failed").length
+      live: snapshot.jobs.filter((job) => job.status !== "completed" && job.status !== "failed").length,
+      completed: snapshot.jobs.filter((job) => job.status === "completed").length,
+      failed: snapshot.jobs.filter((job) => job.status === "failed").length
     };
   }, [snapshot]);
 
-  const incidentsById = useMemo(() => {
-    const map = new Map<string, { category: string }>();
-    for (const incident of snapshot?.incidents ?? []) {
-      map.set(incident.id, {
-        category: incident.category
-      });
+  const jobsById = useMemo(() => {
+    const map = new Map<string, { title: string; category: string }>();
+    for (const job of snapshot?.jobs ?? []) {
+      map.set(job.id, { title: job.title, category: job.category });
     }
     return map;
   }, [snapshot]);
+
+  const pluginCounts = useMemo(() => {
+    return {
+      active: plugins.filter((plugin) => plugin.status === "active").length,
+      rejected: plugins.filter((plugin) => plugin.status === "rejected").length
+    };
+  }, [plugins]);
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <div>
-          <p className="overline">Trust-Gated Autonomous System</p>
-          <h1>Trust City Autonomous Ops</h1>
+          <p className="overline">Open Autonomous Work Market</p>
+          <h1>Trust City Exchange</h1>
         </div>
         <div className={`status status-${wsStatus}`}>
           <span className="dot" />
@@ -141,35 +161,35 @@ export default function App() {
 
         <aside className="side-panel">
           <section className="card metrics-card">
-            <h2>Mission Metrics</h2>
+            <h2>Market Metrics</h2>
             <div className="metric-row">
               <div>
                 <p className="metric-label">Tick</p>
                 <p className="metric-value">{snapshot?.tick ?? 0}</p>
               </div>
               <div>
-                <p className="metric-label">Open</p>
-                <p className="metric-value">{incidentStats.open}</p>
+                <p className="metric-label">Live Jobs</p>
+                <p className="metric-value">{jobStats.live}</p>
               </div>
               <div>
-                <p className="metric-label">Resolved</p>
-                <p className="metric-value">{incidentStats.resolved}</p>
+                <p className="metric-label">Completed</p>
+                <p className="metric-value">{jobStats.completed}</p>
               </div>
               <div>
-                <p className="metric-label">Failed</p>
-                <p className="metric-value">{incidentStats.failed}</p>
+                <p className="metric-label">Plugins</p>
+                <p className="metric-value">{pluginCounts.active}</p>
               </div>
             </div>
             <p className="budget-line">
               Tool budget: {snapshot?.budget.usedToolCalls ?? 0}/{snapshot?.budget.maxToolCalls ?? 0}
             </p>
             <p className="budget-line">
-              World seed: {snapshot?.worldSeed ?? 0} | Districts: {snapshot?.districts.length ?? 0}
+              Retry budget: {snapshot?.budget.maxRetriesPerJob ?? 0} | Active chats: {snapshot?.chats.length ?? 0}
             </p>
           </section>
 
           <section className="card manifest-card">
-            <h2>Agent Identity</h2>
+            <h2>City Operator</h2>
             <p className="manifest-item">
               <span>Name:</span> {manifest?.agentName ?? "loading"}
             </p>
@@ -178,6 +198,9 @@ export default function App() {
             </p>
             <p className="manifest-item">
               <span>ERC-8004 ID:</span> {manifest?.erc8004Identity ?? "loading"}
+            </p>
+            <p className="manifest-item">
+              <span>Mode:</span> Plugin-enabled trust marketplace
             </p>
           </section>
 
@@ -189,14 +212,39 @@ export default function App() {
                   <div>
                     <p className="agent-name">{agent.name}</p>
                     <p className="agent-phase">{formatPhase(agent.phase)}</p>
-                    <p className="agent-home">{`Base: ${ROLE_HUBS[agent.role].name}`}</p>
+                    <p className="agent-home">{`${agent.kind === "plugin" ? "Plugin" : "Core"} | Base: ${ROLE_HUBS[agent.role].name}`}</p>
                   </div>
                   <div className="agent-meta">
                     <p>Trust {agent.trustScore.toFixed(2)}</p>
                     <p>Energy {(agent.energy * 100).toFixed(0)}%</p>
-                    <p>{agent.assignedIncidentId ? `On ${formatCategory(incidentsById.get(agent.assignedIncidentId)?.category ?? "task")}` : "At base"}</p>
+                    <p>{agent.assignedJobId ? jobsById.get(agent.assignedJobId)?.title ?? "On job" : "Idle"}</p>
                   </div>
                 </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="card manifest-card">
+            <h2>Plugin Dock</h2>
+            <div className="feed-list">
+              {plugins.map((plugin) => (
+                <p key={plugin.id} className={plugin.status === "rejected" ? "log-failure" : "log-onchain"}>
+                  [{plugin.status}] {plugin.label}: {plugin.summary}
+                </p>
+              ))}
+            </div>
+            <p className="budget-line">POST {httpBase}/plugins to plug your agent into the city.</p>
+          </section>
+
+          <section className="card manifest-card">
+            <h2>Live Jobs</h2>
+            <div className="feed-list">
+              {(snapshot?.jobs ?? []).map((job) => (
+                <p key={job.id} className={job.status === "failed" ? "log-failure" : job.status === "completed" ? "log-onchain" : "log-decision"}>
+                  [{formatStatus(job.status)}] {job.title}
+                  <br />
+                  {JOB_ROUTING[job.category].label} | {job.submitter} | Trust {job.requiredTrust.toFixed(2)}
+                </p>
               ))}
             </div>
           </section>
@@ -222,46 +270,21 @@ export default function App() {
           </section>
 
           <section className="card manifest-card">
-            <h2>City Logic</h2>
+            <h2>How It Works</h2>
             <p className="manifest-item">
-              <span>Scout Hub:</span> {ROLE_HUBS.scout.name} discovers incidents.
+              <span>Arrival Port:</span> jobs and plugin agents enter the city.
             </p>
             <p className="manifest-item">
-              <span>Planning Hub:</span> {ROLE_HUBS.planner.name} creates strategy.
+              <span>Planning Hall:</span> work is decomposed and matched to trusted specialists.
             </p>
             <p className="manifest-item">
-              <span>Execution Hub:</span> {ROLE_HUBS.builder.name} runs fixes.
+              <span>Guild District:</span> core and plugin builders execute real toolchains.
             </p>
             <p className="manifest-item">
-              <span>Verification Hub:</span> {ROLE_HUBS.verifier.name} quality-gates output.
+              <span>Audit Gate:</span> outputs are validated before settlement.
             </p>
             <p className="manifest-item">
-              <span>Publishing Hub:</span> {ROLE_HUBS.publisher.name} emits receipts.
-            </p>
-            <p className="manifest-item">
-              <span>CI Routing:</span> {INCIDENT_ROUTING.ci_failure.zoneName}
-            </p>
-            <p className="manifest-item">
-              <span>Security Routing:</span> {INCIDENT_ROUTING.security_vuln.zoneName}
-            </p>
-            <p className="manifest-item">
-              <span>API Routing:</span> {INCIDENT_ROUTING.api_regression.zoneName}
-            </p>
-          </section>
-
-          <section className="card manifest-card">
-            <h2>World Controls</h2>
-            <p className="manifest-item">
-              <span>Move:</span> WASD / Arrow Keys
-            </p>
-            <p className="manifest-item">
-              <span>Up/Down:</span> Q / E
-            </p>
-            <p className="manifest-item">
-              <span>Speed:</span> Shift sprint, Ctrl precision
-            </p>
-            <p className="manifest-item">
-              <span>Mouse:</span> Orbit / Pan + Wheel zoom
+              <span>Receipt Tower:</span> verified jobs emit ERC-8004 receipts.
             </p>
           </section>
         </aside>

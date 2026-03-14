@@ -4,9 +4,9 @@ import { Line, OrbitControls, Sky, Stars, Text } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import * as THREE from "three";
-import { AGENT_COLORS, type Incident, type Vec2, type WorldSnapshot } from "@trust-city/shared";
+import { AGENT_COLORS, type ChatMessage, type Job, type Vec2, type WorldSnapshot } from "@trust-city/shared";
 import { buildStreamedCity, CHUNK_SIZE } from "../city/generator";
-import { DistrictOverlay, DynamicRoads, IncidentBeacon, RoleHubLandmarks, StructureBlock, TrafficLanes } from "../city/layers";
+import { DistrictOverlay, DynamicRoads, JobBeacon, PluginRegistryBoard, RoleHubLandmarks, StructureBlock, TrafficLanes } from "../city/layers";
 import AnimatedAgentAvatar from "./AnimatedAgentAvatar";
 
 interface Props {
@@ -19,11 +19,11 @@ function toPathPoint(position: Vec2): [number, number, number] {
   return [position.x, 0.35, position.y];
 }
 
-function severityRank(severity: Incident["severity"]): number {
-  if (severity === "high") {
+function priorityRank(priority: Job["priority"]): number {
+  if (priority === "critical") {
     return 3;
   }
-  if (severity === "medium") {
+  if (priority === "priority") {
     return 2;
   }
   return 1;
@@ -34,13 +34,13 @@ function getFocusPoint(snapshot: WorldSnapshot | null): Vec2 {
     return { x: 0, y: 0 };
   }
 
-  const activeIncidents = snapshot.incidents.filter((incident) => incident.status === "open" || incident.status === "in_progress");
-  const focusIncident =
-    activeIncidents.find((incident) => incident.id === snapshot.cinematicFocus) ??
-    activeIncidents.sort((a, b) => severityRank(b.severity) - severityRank(a.severity))[0];
+  const activeJobs = snapshot.jobs.filter((job) => job.status !== "completed" && job.status !== "failed");
+  const focusJob =
+    activeJobs.find((job) => job.id === snapshot.cinematicFocus) ??
+    activeJobs.sort((a, b) => priorityRank(b.priority) - priorityRank(a.priority))[0];
 
-  if (focusIncident) {
-    return focusIncident.position;
+  if (focusJob) {
+    return focusJob.position;
   }
 
   if (snapshot.agents.length === 0) {
@@ -131,12 +131,12 @@ function FreeRoamController({
     }
 
     const keys = keysRef.current;
-    const forwardInput = (keys["w"] || keys["arrowup"] ? 1 : 0) - (keys["s"] || keys["arrowdown"] ? 1 : 0);
-    const strafeInput = (keys["d"] || keys["arrowright"] ? 1 : 0) - (keys["a"] || keys["arrowleft"] ? 1 : 0);
-    const verticalInput = (keys["e"] ? 1 : 0) - (keys["q"] ? 1 : 0);
+    const forwardInput = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0);
+    const strafeInput = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0);
+    const verticalInput = (keys.e ? 1 : 0) - (keys.q ? 1 : 0);
     const hasInput = forwardInput !== 0 || strafeInput !== 0 || verticalInput !== 0;
 
-    const speed = (keys["shift"] ? 36 : 16) * (keys["control"] ? 0.35 : 1);
+    const speed = (keys.shift ? 36 : 16) * (keys.control ? 0.35 : 1);
     const forward = forwardRef.current;
     controls.object.getWorldDirection(forward);
     forward.y = 0;
@@ -200,6 +200,16 @@ function StreamAnchorController({
   return null;
 }
 
+function latestChatsByActor(chats: ChatMessage[]): Map<string, ChatMessage> {
+  const map = new Map<string, ChatMessage>();
+  for (const chat of chats) {
+    if (!map.has(chat.actorId)) {
+      map.set(chat.actorId, chat);
+    }
+  }
+  return map;
+}
+
 export default function WorldScene({ snapshot }: Props) {
   const focusPoint = useMemo(() => getFocusPoint(snapshot), [snapshot]);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
@@ -237,13 +247,15 @@ export default function WorldScene({ snapshot }: Props) {
     });
   }, [snapshot]);
 
-  const incidentsById = useMemo(() => {
-    const map = new Map<string, Incident>();
-    for (const incident of snapshot?.incidents ?? []) {
-      map.set(incident.id, incident);
+  const jobsById = useMemo(() => {
+    const map = new Map<string, Job>();
+    for (const job of snapshot?.jobs ?? []) {
+      map.set(job.id, job);
     }
     return map;
-  }, [snapshot?.incidents]);
+  }, [snapshot?.jobs]);
+
+  const chatsByActor = useMemo(() => latestChatsByActor(snapshot?.chats ?? []), [snapshot?.chats]);
 
   return (
     <Canvas
@@ -279,6 +291,7 @@ export default function WorldScene({ snapshot }: Props) {
 
       {snapshot ? <DistrictOverlay snapshot={snapshot} /> : null}
       <RoleHubLandmarks />
+      {snapshot ? <PluginRegistryBoard plugins={snapshot.pluginAgents} /> : null}
 
       {streamedCity.far.map((structure) => (
         <StructureBlock key={`far-${structure.x}-${structure.z}-${structure.kind}`} structure={structure} />
@@ -287,10 +300,10 @@ export default function WorldScene({ snapshot }: Props) {
         <StructureBlock key={`near-${structure.x}-${structure.z}-${structure.kind}`} structure={structure} />
       ))}
 
-      {(snapshot?.incidents ?? [])
-        .filter((incident) => incident.status === "open" || incident.status === "in_progress")
-        .map((incident) => (
-          <IncidentBeacon key={incident.id} incident={incident} />
+      {(snapshot?.jobs ?? [])
+        .filter((job) => job.status !== "completed" && job.status !== "failed")
+        .map((job) => (
+          <JobBeacon key={job.id} job={job} />
         ))}
 
       <Suspense fallback={null}>
@@ -298,7 +311,8 @@ export default function WorldScene({ snapshot }: Props) {
           <AnimatedAgentAvatar
             key={agent.id}
             agent={agent}
-            incident={agent.assignedIncidentId ? incidentsById.get(agent.assignedIncidentId) : undefined}
+            job={agent.assignedJobId ? jobsById.get(agent.assignedJobId) : undefined}
+            chat={chatsByActor.get(agent.id)}
           />
         ))}
       </Suspense>

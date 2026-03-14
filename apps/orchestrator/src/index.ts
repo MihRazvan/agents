@@ -1,23 +1,28 @@
 import cors from "cors";
 import express from "express";
-import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import {
   AGENT_COLORS,
-  INCIDENT_ROUTING,
+  DISTRICT_THEME_PURPOSE,
+  JOB_ROUTING,
   ROLE_HUBS,
+  TRUST_THRESHOLD,
+  type AgentCapabilities,
   type AgentManifest,
   type AgentPhase,
   type AgentRole,
   type AgentRuntimeState,
+  type ChatMessage,
   type District,
-  type Incident,
+  type Job,
+  type JobCategory,
   type LogEntry,
-  TRUST_THRESHOLD,
+  type PluginAgentRecord,
   type Vec2,
   type WorldSnapshot,
   type WsMessage
@@ -33,10 +38,10 @@ const LOOP_INTERVAL_MS = 400;
 const WORLD_SEED = Number(process.env.WORLD_SEED ?? "271828");
 
 const operatorWallet = process.env.OPERATOR_WALLET ?? "0xD3aDbeefD3aDbeefD3aDbeefD3aDbeefD3aDbeef";
-const erc8004Identity = process.env.AGENT_ERC8004_ID ?? "agent:erc8004:trust-city-alpha";
+const erc8004Identity = process.env.AGENT_ERC8004_ID ?? "agent:erc8004:trust-city-exchange";
 
-const GRID_MIN = -128;
-const GRID_MAX = 128;
+const GRID_MIN = -164;
+const GRID_MAX = 164;
 const GRID_STEP = 1;
 const ROAD_MAJOR_SPACING = 24;
 const ROAD_MINOR_SPACING = 12;
@@ -44,7 +49,7 @@ const ROAD_MAJOR_HALF_WIDTH = 2;
 const ROAD_MINOR_HALF_WIDTH = 1;
 
 const manifest: AgentManifest = {
-  agentName: "Trust City Autonomous Ops",
+  agentName: "Trust City Exchange",
   operatorWallet,
   erc8004Identity,
   supportedTools: [
@@ -52,34 +57,56 @@ const manifest: AgentManifest = {
     "git",
     "security_scanner",
     "test_runner",
-    "websocket_stream",
+    "deploy_preview",
     "erc8004_registry_writer",
-    "path_router"
+    "plugin_registry",
+    "move_cli",
+    "research_fetcher"
   ],
-  supportedTechStacks: ["TypeScript", "React", "Three.js", "Node.js", "EVM"],
+  supportedTechStacks: ["TypeScript", "React", "Three.js", "Node.js", "EVM", "Move"],
   computeConstraints: {
-    maxToolCalls: 280,
+    maxToolCalls: 320,
     maxRuntimeSeconds: 1200,
     retryLimit: 3
   },
-  supportedTaskCategories: [
-    "ci_failure_response",
-    "dependency_vulnerability_patch",
-    "reputation_gated_multi_agent_collaboration"
-  ]
+  supportedTaskCategories: ["microsite_build", "github_bugfix", "protocol_research", "move_contract", "contract_audit"],
+  primarySkills: ["job-routing", "trust-gating", "agent-orchestration", "receipt-publishing"],
+  executionMode: "internal"
 };
 
 const budget = {
-  maxToolCalls: 280,
+  maxToolCalls: 320,
   usedToolCalls: 0,
-  maxRetriesPerIncident: 3,
+  maxRetriesPerJob: 3,
   maxRuntimeSeconds: 1200
 };
 
-interface IncidentWorkflow {
+interface JobWorkflow {
   stage: number;
   activeAgentId?: string;
   startedAtTick: number;
+}
+
+interface JobTemplate {
+  title: string;
+  summary: string;
+  category: JobCategory;
+  priority: Job["priority"];
+  source: Job["source"];
+  submitter: string;
+  requestedSkills: string[];
+  requiredTools: string[];
+  requiredTrust: number;
+  deliverable: string;
+}
+
+interface PluginRegistrationRequest {
+  label?: string;
+  summary?: string;
+  manifest: AgentManifest;
+  preferredDistrictId?: string;
+  trustScore?: number;
+  specialty?: string;
 }
 
 const stageByIndex: Array<{ key: AgentPhase; role: AgentRole; label: string }> = [
@@ -103,6 +130,19 @@ const navigation = createNavigation({
   roadMinorHalfWidth: ROAD_MINOR_HALF_WIDTH
 });
 
+const jobs: Job[] = [];
+const jobQueue: JobTemplate[] = buildJobTemplates();
+const pluginAgents: PluginAgentRecord[] = [];
+const workflows = new Map<string, JobWorkflow>();
+const logs: LogEntry[] = [];
+const chats: ChatMessage[] = [];
+const receipts: string[] = [];
+
+let tick = 0;
+let loopStartedAt = Date.now();
+let cinematicFocus: string | undefined;
+let queuedJobIndex = 0;
+
 function hubPoint(role: AgentRole, offset?: Vec2): Vec2 {
   return {
     x: ROLE_HUBS[role].position.x + (offset?.x ?? 0),
@@ -110,89 +150,141 @@ function hubPoint(role: AgentRole, offset?: Vec2): Vec2 {
   };
 }
 
+function allCategories(): JobCategory[] {
+  return ["microsite_build", "github_bugfix", "protocol_research", "move_contract", "contract_audit"];
+}
+
+function capabilityProfile(
+  primarySkills: string[],
+  taskCategories: JobCategory[],
+  supportedTools: string[],
+  maxConcurrentJobs = 1
+): AgentCapabilities {
+  return {
+    primarySkills,
+    taskCategories,
+    supportedTools,
+    maxConcurrentJobs
+  };
+}
+
+function createCoreAgent(config: {
+  id: string;
+  name: string;
+  role: AgentRole;
+  trustScore: number;
+  speed: number;
+  specialty: string;
+  homeDistrictId: string;
+  capabilities: AgentCapabilities;
+  offset?: Vec2;
+}): AgentRuntimeState {
+  const home = hubPoint(config.role, config.offset);
+  return {
+    id: config.id,
+    name: config.name,
+    role: config.role,
+    kind: "core",
+    phase: "idle",
+    trustScore: config.trustScore,
+    position: home,
+    target: home,
+    path: [],
+    energy: 1,
+    speed: config.speed,
+    specialty: config.specialty,
+    operatorWallet,
+    erc8004Identity: `agent:erc8004:${config.id}`,
+    homeDistrictId: config.homeDistrictId,
+    capabilities: config.capabilities,
+    statusLine: `Ready at ${ROLE_HUBS[config.role].name}`
+  };
+}
+
 const agents: AgentRuntimeState[] = [
-  {
+  createCoreAgent({
     id: "agent-scout-1",
     name: "Scout Nova",
     role: "scout",
-    phase: "idle",
     trustScore: 0.91,
-    position: hubPoint("scout"),
-    target: hubPoint("scout"),
-    path: [],
-    energy: 1,
-    speed: 1.24
-  },
-  {
+    speed: 1.2,
+    specialty: "Job intake and source classification",
+    homeDistrictId: "district-registry",
+    capabilities: capabilityProfile(["intake", "classification", "source-triage"], allCategories(), ["job_feed", "registry_reader"])
+  }),
+  createCoreAgent({
     id: "agent-planner-1",
     name: "Planner Atlas",
     role: "planner",
-    phase: "idle",
-    trustScore: 0.87,
-    position: hubPoint("planner"),
-    target: hubPoint("planner"),
-    path: [],
-    energy: 1,
-    speed: 1.04
-  },
-  {
+    trustScore: 0.89,
+    speed: 1.04,
+    specialty: "Task decomposition and routing strategy",
+    homeDistrictId: "district-atlas",
+    capabilities: capabilityProfile(
+      ["decomposition", "capability-matching", "dependency-mapping"],
+      allCategories(),
+      ["planner_graph", "registry_reader", "policy_engine"]
+    )
+  }),
+  createCoreAgent({
     id: "agent-builder-1",
     name: "Builder Forge",
     role: "builder",
-    phase: "idle",
-    trustScore: 0.74,
-    position: hubPoint("builder"),
-    target: hubPoint("builder"),
-    path: [],
-    energy: 1,
-    speed: 0.94
-  },
-  {
+    trustScore: 0.76,
+    speed: 0.96,
+    specialty: "React, repo patches, and shipping previews",
+    homeDistrictId: "district-guild",
+    capabilities: capabilityProfile(
+      ["react", "typescript", "repo-fixes", "deployments"],
+      ["microsite_build", "github_bugfix", "contract_audit"],
+      ["github_api", "git", "vite", "test_runner", "deploy_preview"]
+    )
+  }),
+  createCoreAgent({
     id: "agent-builder-2",
     name: "Builder Flux",
     role: "builder",
-    phase: "idle",
     trustScore: 0.63,
-    position: hubPoint("builder", { x: 12, y: 0 }),
-    target: hubPoint("builder", { x: 12, y: 0 }),
-    path: [],
-    energy: 1,
-    speed: 0.9
-  },
-  {
+    speed: 0.9,
+    specialty: "General execution, lower trust tier",
+    homeDistrictId: "district-guild",
+    capabilities: capabilityProfile(
+      ["typescript", "automation"],
+      ["github_bugfix", "microsite_build"],
+      ["github_api", "git", "test_runner"],
+      1
+    ),
+    offset: { x: 10, y: -2 }
+  }),
+  createCoreAgent({
     id: "agent-verifier-1",
     name: "Verifier Echo",
     role: "verifier",
-    phase: "idle",
-    trustScore: 0.89,
-    position: hubPoint("verifier"),
-    target: hubPoint("verifier"),
-    path: [],
-    energy: 1,
-    speed: 0.98
-  },
-  {
+    trustScore: 0.92,
+    speed: 0.98,
+    specialty: "Quality gates, trust checks, and evidence review",
+    homeDistrictId: "district-registry",
+    capabilities: capabilityProfile(
+      ["testing", "audit", "verification"],
+      allCategories(),
+      ["test_runner", "security_scanner", "registry_reader", "evidence_packager"]
+    )
+  }),
+  createCoreAgent({
     id: "agent-publisher-1",
     name: "Publisher Relay",
     role: "publisher",
-    phase: "idle",
-    trustScore: 0.9,
-    position: hubPoint("publisher"),
-    target: hubPoint("publisher"),
-    path: [],
-    energy: 1,
-    speed: 1.08
-  }
+    trustScore: 0.94,
+    speed: 1.08,
+    specialty: "Artifact packaging and ERC-8004 receipt publishing",
+    homeDistrictId: "district-commons",
+    capabilities: capabilityProfile(
+      ["publishing", "submission", "receipt-writing"],
+      allCategories(),
+      ["deploy_preview", "erc8004_registry_writer", "artifact_packager"]
+    )
+  })
 ];
-
-const incidents: Incident[] = [];
-const workflows = new Map<string, IncidentWorkflow>();
-const logs: LogEntry[] = [];
-const receipts: string[] = [];
-
-let tick = 0;
-let loopStartedAt = Date.now();
-let cinematicFocus: string | undefined;
 
 const app = express();
 app.use(cors());
@@ -230,8 +322,14 @@ function broadcast<T>(message: WsMessage<T>): void {
 }
 
 function trimLogs(): void {
-  if (logs.length > 1500) {
-    logs.splice(0, logs.length - 1500);
+  if (logs.length > 1800) {
+    logs.splice(0, logs.length - 1800);
+  }
+}
+
+function trimChats(): void {
+  if (chats.length > 80) {
+    chats.splice(0, chats.length - 80);
   }
 }
 
@@ -263,6 +361,19 @@ function addLog(
   void persistArtifacts();
 }
 
+function addChat(actorId: string, actorName: string, message: string, tone: ChatMessage["tone"] = "info"): void {
+  const chat: ChatMessage = {
+    id: randomUUID(),
+    timestamp: nowIso(),
+    actorId,
+    actorName,
+    tone,
+    message
+  };
+  chats.push(chat);
+  trimChats();
+}
+
 function getSnapshot(): WorldSnapshot {
   return {
     timestamp: nowIso(),
@@ -273,48 +384,119 @@ function getSnapshot(): WorldSnapshot {
     cinematicFocus,
     receipts,
     agents,
-    incidents
+    jobs,
+    pluginAgents,
+    chats
   };
 }
 
 function buildDistricts(): District[] {
   const districtDefs = [
     {
-      name: "Core Nexus",
+      id: "district-registry",
+      name: DISTRICT_THEME_PURPOSE.core.label,
       theme: "core" as const,
-      center: { x: ROLE_HUBS.verifier.position.x - 8, y: ROLE_HUBS.verifier.position.y + 24 }
+      center: { x: 84, y: 28 }
     },
     {
-      name: "Forge Quarter",
+      id: "district-guild",
+      name: DISTRICT_THEME_PURPOSE.industrial.label,
       theme: "industrial" as const,
-      center: { x: ROLE_HUBS.builder.position.x + 18, y: ROLE_HUBS.builder.position.y - 24 }
+      center: { x: 28, y: -34 }
     },
     {
-      name: "Helix Labs",
+      id: "district-atlas",
+      name: DISTRICT_THEME_PURPOSE.research.label,
       theme: "research" as const,
-      center: { x: ROLE_HUBS.planner.position.x - 12, y: ROLE_HUBS.planner.position.y + 24 }
+      center: { x: -44, y: 18 }
     },
     {
-      name: "Lumen Habitat",
+      id: "district-commons",
+      name: DISTRICT_THEME_PURPOSE.residential.label,
       theme: "residential" as const,
-      center: { x: ROLE_HUBS.publisher.position.x - 8, y: ROLE_HUBS.publisher.position.y + 30 }
+      center: { x: 118, y: 40 }
     }
   ];
 
   return districtDefs.map((item, index) => {
-    const jitterScale = 2 + index;
+    const jitterScale = 3 + index;
     return {
-      id: `district-${index + 1}`,
+      id: item.id,
       name: item.name,
       center: {
         x: item.center.x + (rng() * 2 - 1) * jitterScale,
         y: item.center.y + (rng() * 2 - 1) * jitterScale
       },
-      radius: 10 + rng() * 4,
+      radius: 14 + rng() * 6,
       theme: item.theme,
-      riskLevel: 0.45 + rng() * 0.5
+      riskLevel: 0.45 + rng() * 0.45
     };
   });
+}
+
+function buildJobTemplates(): JobTemplate[] {
+  return [
+    {
+      title: "Launch page for Move Sentinel",
+      summary: "Create a one-page microsite that explains why the Move plugin agent can be trusted and what jobs it accepts.",
+      category: "microsite_build",
+      priority: "priority",
+      source: "operator",
+      submitter: "Hackathon Operator",
+      requestedSkills: ["React", "copywriting", "deployment"],
+      requiredTools: ["github_api", "vite", "deploy_preview"],
+      requiredTrust: 0.72,
+      deliverable: "Preview deployment with summary card"
+    },
+    {
+      title: "Patch wallet connect regression",
+      summary: "Investigate a failing GitHub issue in the onboarding flow and produce a tested remediation patch.",
+      category: "github_bugfix",
+      priority: "priority",
+      source: "github",
+      submitter: "GitHub Queue",
+      requestedSkills: ["TypeScript", "debugging", "tests"],
+      requiredTools: ["github_api", "git", "test_runner"],
+      requiredTrust: 0.7,
+      deliverable: "Patch artifact with test evidence"
+    },
+    {
+      title: "Research ERC-8004 collaboration patterns",
+      summary: "Produce a sourced research brief on trust-gated agent collaboration patterns and validation workflows.",
+      category: "protocol_research",
+      priority: "routine",
+      source: "api",
+      submitter: "Research Feed",
+      requestedSkills: ["analysis", "sourcing", "writing"],
+      requiredTools: ["research_fetcher"],
+      requiredTrust: 0.68,
+      deliverable: "Research brief with source digest"
+    },
+    {
+      title: "Review Move vault module",
+      summary: "A partner agent submitted a Move vault module. Validate it, identify issues, and package a delivery receipt.",
+      category: "move_contract",
+      priority: "critical",
+      source: "agent",
+      submitter: "Partner Agent",
+      requestedSkills: ["Move", "auditing", "tests"],
+      requiredTools: ["move_cli", "test_runner", "github_api"],
+      requiredTrust: 0.82,
+      deliverable: "Validated Move report with attestation"
+    },
+    {
+      title: "Audit plugin payout contract",
+      summary: "Review a lightweight payout contract used for agent task settlements and produce a verification verdict.",
+      category: "contract_audit",
+      priority: "priority",
+      source: "operator",
+      submitter: "Protocol Team",
+      requestedSkills: ["solidity", "security", "evidence"],
+      requiredTools: ["security_scanner", "test_runner"],
+      requiredTrust: 0.8,
+      deliverable: "Audit summary and verification receipt"
+    }
+  ];
 }
 
 function setAgentDestination(agent: AgentRuntimeState, destination: Vec2): void {
@@ -322,20 +504,6 @@ function setAgentDestination(agent: AgentRuntimeState, destination: Vec2): void 
   const path = navigation.planPath(agent.position, safeDestination);
   agent.path = path;
   agent.target = path[0] ?? safeDestination;
-}
-
-function findAgentsByRole(role: AgentRole): AgentRuntimeState[] {
-  return agents
-    .filter((agent) => agent.role === role)
-    .sort((a, b) => b.trustScore - a.trustScore);
-}
-
-function findIdleAgentsByRole(role: AgentRole): AgentRuntimeState[] {
-  return findAgentsByRole(role).filter((agent) => agent.phase === "idle" && !agent.assignedIncidentId);
-}
-
-function roleHubPosition(role: AgentRole): Vec2 {
-  return hubPoint(role);
 }
 
 function setAgentIdle(agentId?: string): void {
@@ -347,139 +515,224 @@ function setAgentIdle(agentId?: string): void {
     return;
   }
   agent.phase = "idle";
-  agent.assignedIncidentId = undefined;
-  setAgentDestination(agent, roleHubPosition(agent.role));
+  agent.assignedJobId = undefined;
+  agent.statusLine = `Ready at ${ROLE_HUBS[agent.role].name}`;
+  setAgentDestination(agent, hubPoint(agent.role));
 }
 
-function allocateStageAgent(incident: Incident, workflow: IncidentWorkflow): AgentRuntimeState | null {
+function scoreAgentForJob(agent: AgentRuntimeState, job: Job): number {
+  const skillMatches = job.requestedSkills.filter((skill) =>
+    agent.capabilities.primarySkills.some((entry) => entry.toLowerCase().includes(skill.toLowerCase()))
+  ).length;
+  const toolMatches = job.requiredTools.filter((tool) => agent.capabilities.supportedTools.includes(tool)).length;
+  const categoryMatch = agent.capabilities.taskCategories.includes(job.category) ? 2 : 0;
+  const pluginBonus = agent.kind === "plugin" ? 0.6 : 0;
+  return agent.trustScore * 4 + skillMatches * 1.1 + toolMatches * 0.7 + categoryMatch + pluginBonus;
+}
+
+function supportsJobStage(agent: AgentRuntimeState, role: AgentRole, job: Job): boolean {
+  if (agent.role !== role) {
+    return false;
+  }
+
+  const threshold = Math.max(TRUST_THRESHOLD, role === "builder" || role === "verifier" || role === "publisher" ? job.requiredTrust : TRUST_THRESHOLD);
+  if (agent.trustScore < threshold) {
+    return false;
+  }
+
+  if (!agent.capabilities.taskCategories.includes(job.category)) {
+    return false;
+  }
+
+  if (role === "builder") {
+    return job.requiredTools.every((tool) => agent.capabilities.supportedTools.includes(tool));
+  }
+
+  return true;
+}
+
+function findEligibleAgents(role: AgentRole, job: Job): AgentRuntimeState[] {
+  return agents
+    .filter((agent) => agent.phase === "idle" && !agent.assignedJobId)
+    .filter((agent) => supportsJobStage(agent, role, job))
+    .sort((a, b) => scoreAgentForJob(b, job) - scoreAgentForJob(a, job));
+}
+
+function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState | null {
   const step = stageByIndex[workflow.stage];
-  const preferred = findAgentsByRole(step.role);
-  const available = findIdleAgentsByRole(step.role);
-  const candidate = available.find((agent) => agent.trustScore >= TRUST_THRESHOLD) ?? null;
+  const candidates = findEligibleAgents(step.role, job);
+  const candidate = candidates[0] ?? null;
 
   if (!candidate) {
-    cinematicFocus = incident.id;
-    addLog("safety", "policy-engine", "Trust gate blocked handoff", {
-      incidentId: incident.id,
+    cinematicFocus = job.id;
+    addLog("safety", "policy-engine", "Trust gate blocked job handoff", {
+      jobId: job.id,
       requiredRole: step.role,
-      threshold: TRUST_THRESHOLD,
-      availableAgents: available.map((agent) => ({ id: agent.id, trustScore: agent.trustScore })),
-      busyAgents: preferred
-        .filter((agent) => !available.includes(agent))
-        .map((agent) => ({ id: agent.id, trustScore: agent.trustScore, phase: agent.phase, assignedIncidentId: agent.assignedIncidentId }))
+      category: job.category,
+      threshold: Math.max(TRUST_THRESHOLD, job.requiredTrust)
     });
+    addChat("policy-engine", "Policy Engine", `${JOB_ROUTING[job.category].label} paused. No eligible ${step.role} cleared trust and capability checks.`, "warning");
     return null;
   }
 
   candidate.phase = step.key;
-  candidate.assignedIncidentId = incident.id;
-  setAgentDestination(candidate, incident.position);
+  candidate.assignedJobId = job.id;
+  candidate.statusLine = `${step.label} ${JOB_ROUTING[job.category].label}`;
+  setAgentDestination(candidate, job.position);
+
   workflow.activeAgentId = candidate.id;
-  incident.ownerAgentId = candidate.id;
-  incident.status = "in_progress";
-  cinematicFocus = incident.id;
+  job.ownerAgentId = candidate.id;
+  job.assignedAgentIds = [...new Set([...job.assignedAgentIds, candidate.id])];
+  job.status = workflow.stage < 2 ? "negotiating" : workflow.stage === 3 ? "verifying" : "in_progress";
+  cinematicFocus = job.id;
 
   addLog("decision", candidate.id, `Assigned ${step.label} stage to ${candidate.name}`, {
-    incidentId: incident.id,
+    jobId: job.id,
+    category: job.category,
     stage: workflow.stage,
     trustScore: candidate.trustScore,
-    color: AGENT_COLORS[candidate.role],
-    routePoints: candidate.path.length
+    kind: candidate.kind,
+    color: AGENT_COLORS[candidate.role]
   });
+  addChat(candidate.id, candidate.name, `${step.label === "execute" ? "Taking" : "Claiming"} ${JOB_ROUTING[job.category].label} for ${step.label}.`, "decision");
 
   return candidate;
 }
 
-function stageFailureChance(stage: number, incident: Incident): number {
-  const base = incident.severity === "high" ? 0.23 : incident.severity === "medium" ? 0.16 : 0.1;
-  return Math.min(0.45, base + stage * 0.04);
+function stageFailureChance(stage: number, job: Job, actor: AgentRuntimeState): number {
+  const base = job.priority === "critical" ? 0.21 : job.priority === "priority" ? 0.14 : 0.09;
+  const categoryPenalty = job.category === "move_contract" ? 0.06 : job.category === "contract_audit" ? 0.04 : 0;
+  const trustRelief = Math.max(0, actor.trustScore - 0.7) * 0.12;
+  return Math.min(0.42, Math.max(0.04, base + categoryPenalty + stage * 0.03 - trustRelief));
 }
 
-function runToolCall(step: { label: string; key: AgentPhase }, actor: AgentRuntimeState, incident: Incident): boolean {
+function runToolCall(step: { label: string; key: AgentPhase }, actor: AgentRuntimeState, job: Job): boolean {
   budget.usedToolCalls += 1;
 
+  const preferredTool =
+    step.key === "execute"
+      ? job.requiredTools[0] ?? actor.capabilities.supportedTools[0]
+      : actor.capabilities.supportedTools[Math.min(1, actor.capabilities.supportedTools.length - 1)] ?? `${step.key}_toolchain`;
+
   addLog("tool_call", actor.id, `Toolchain execution for ${step.label}`, {
-    incidentId: incident.id,
-    tool: `${step.key}_toolchain_v2`,
+    jobId: job.id,
+    tool: preferredTool,
     usedToolCalls: budget.usedToolCalls,
     maxToolCalls: budget.maxToolCalls
   });
+  addChat(actor.id, actor.name, `${step.label === "execute" ? "Running" : "Using"} ${preferredTool} on ${JOB_ROUTING[job.category].label}.`);
 
-  const failed = Math.random() < stageFailureChance(workflows.get(incident.id)?.stage ?? 0, incident);
-
+  const failed = Math.random() < stageFailureChance(workflows.get(job.id)?.stage ?? 0, job, actor);
   if (!failed) {
     return true;
   }
 
-  incident.retries += 1;
-  cinematicFocus = incident.id;
+  job.retries += 1;
+  cinematicFocus = job.id;
 
-  addLog("retry", actor.id, "Execution failed, retry scheduled", {
-    incidentId: incident.id,
-    retries: incident.retries,
-    retryLimit: budget.maxRetriesPerIncident
+  addLog("retry", actor.id, "Job step failed, retry scheduled", {
+    jobId: job.id,
+    retries: job.retries,
+    retryLimit: budget.maxRetriesPerJob
   });
+  addChat(actor.id, actor.name, `Tool output failed verification. Re-queuing ${JOB_ROUTING[job.category].label}.`, "warning");
 
-  if (incident.retries > budget.maxRetriesPerIncident) {
-    incident.status = "failed";
-    addLog("failure", actor.id, "Incident marked failed after retry budget exhausted", {
-      incidentId: incident.id,
-      retries: incident.retries
+  if (job.retries > budget.maxRetriesPerJob) {
+    job.status = "failed";
+    job.outputSummary = "Retry budget exhausted before delivery";
+    addLog("failure", actor.id, "Job marked failed after retry budget exhausted", {
+      jobId: job.id,
+      retries: job.retries
     });
   }
 
   return false;
 }
 
-function emitReceipt(action: string, incidentId?: string): string {
+function emitReceipt(action: string, jobId?: string, extra?: Record<string, unknown>): string {
   const txHash = makeTxHash();
   receipts.push(txHash);
-  if (receipts.length > 80) {
-    receipts.splice(0, receipts.length - 80);
+  if (receipts.length > 100) {
+    receipts.splice(0, receipts.length - 100);
   }
   addLog("onchain", "erc8004-writer", `Onchain ${action} receipt committed`, {
     txHash,
-    incidentId
+    jobId,
+    ...extra
   });
-  broadcast({ type: "receipt", payload: { txHash, action, incidentId, timestamp: nowIso() } });
+  broadcast({ type: "receipt", payload: { txHash, action, jobId, timestamp: nowIso(), ...extra } });
   return txHash;
 }
 
-function completeStage(incident: Incident, workflow: IncidentWorkflow): void {
+function finalOutputSummary(job: Job, actor: AgentRuntimeState): string {
+  if (job.category === "microsite_build") {
+    return `Preview ready and packaged by ${actor.name}`;
+  }
+  if (job.category === "github_bugfix") {
+    return `Patch and test evidence prepared by ${actor.name}`;
+  }
+  if (job.category === "protocol_research") {
+    return `Research brief and source digest assembled by ${actor.name}`;
+  }
+  if (job.category === "move_contract") {
+    return `Move validation bundle prepared by ${actor.name}`;
+  }
+  return `Audit verdict and receipt package assembled by ${actor.name}`;
+}
+
+function completeStage(job: Job, workflow: JobWorkflow): void {
   const step = stageByIndex[workflow.stage];
   const actor = agents.find((agent) => agent.id === workflow.activeAgentId);
   if (!actor) {
     return;
   }
 
-  const success = runToolCall(step, actor, incident);
+  const success = runToolCall(step, actor, job);
   if (!success) {
-    if (incident.status === "failed") {
+    if (job.status === "failed") {
       setAgentIdle(actor.id);
       workflow.activeAgentId = undefined;
+      addChat("system", "System", `${job.title} failed after exhausting retries.`, "warning");
+      return;
+    }
+
+    setAgentIdle(actor.id);
+    workflow.activeAgentId = undefined;
+    if (step.key === "verify" && workflow.stage > 1) {
+      workflow.stage = 2;
+      addChat("agent-verifier-1", "Verifier Echo", "Sending work back to execution for correction.", "warning");
     }
     return;
   }
 
-  incident.timeline.push(`${step.label}@${nowIso()}`);
+  job.timeline.push(`${step.label}@${nowIso()}`);
   addLog("output", actor.id, `Stage completed: ${step.label}`, {
-    incidentId: incident.id,
+    jobId: job.id,
     stage: workflow.stage
   });
 
+  if (step.key === "plan") {
+    addChat(actor.id, actor.name, `Plan ready. Needs ${job.requestedSkills.join(", ")} with trust >= ${job.requiredTrust.toFixed(2)}.`, "decision");
+  }
+
   if (step.key === "verify") {
-    emitReceipt("validation_registry_write", incident.id);
+    job.status = "verifying";
+    emitReceipt("validation_registry_write", job.id, { validator: actor.id });
+    addChat(actor.id, actor.name, `Validation passed for ${JOB_ROUTING[job.category].label}.`, "decision");
   }
 
   if (step.key === "submit") {
-    incident.status = "resolved";
-    emitReceipt("reputation_registry_update", incident.id);
-    addLog("output", actor.id, "Incident resolved and submitted", {
-      incidentId: incident.id,
-      finalTimeline: incident.timeline
+    job.status = "completed";
+    job.outputSummary = finalOutputSummary(job, actor);
+    emitReceipt("reputation_registry_update", job.id, { publisher: actor.id });
+    addLog("output", actor.id, "Job completed and submitted", {
+      jobId: job.id,
+      finalTimeline: job.timeline,
+      outputSummary: job.outputSummary
     });
-    cinematicFocus = incident.id;
-    broadcast({ type: "incident_resolved", payload: incident });
+    addChat(actor.id, actor.name, `Delivery sealed. ${job.outputSummary}.`, "decision");
+    cinematicFocus = job.id;
+    broadcast({ type: "job_completed", payload: job });
     setAgentIdle(actor.id);
     workflow.activeAgentId = undefined;
     workflow.stage = stageByIndex.length;
@@ -518,8 +771,8 @@ function tickMovement(): void {
   }
 }
 
-function pickDistrictForCategory(category: Incident["category"]): District {
-  const preferredThemes = INCIDENT_ROUTING[category].preferredThemes;
+function pickDistrictForCategory(category: JobCategory): District {
+  const preferredThemes = JOB_ROUTING[category].preferredThemes;
   const pool = districts.filter((district) => preferredThemes.includes(district.theme));
 
   const weightedPool = (pool.length > 0 ? pool : districts)
@@ -533,77 +786,83 @@ function pickDistrictForCategory(category: Incident["category"]): District {
   return weightedPool[index]?.district ?? districts[0];
 }
 
-function randomIncidentPosition(category: Incident["category"]): { position: Vec2; district: District } {
+function randomJobPosition(category: JobCategory): { position: Vec2; district: District } {
   const district = pickDistrictForCategory(category);
   const center = district.center;
-  const spread = 2 + rng() * 2.6;
+  const spread = 3 + rng() * 3.2;
   const candidate = {
     x: center.x + (rng() * 2 - 1) * spread,
     y: center.y + (rng() * 2 - 1) * spread
   };
+
   return {
     position: navigation.ensureWalkable(candidate),
     district
   };
 }
 
-function spawnIncident(): Incident {
-  const categories: Incident["category"][] = ["ci_failure", "security_vuln", "api_regression"];
-  const severities: Incident["severity"][] = ["low", "medium", "high"];
-  const category = categories[Math.floor(rng() * categories.length)];
-  const severity = severities[Math.floor(rng() * severities.length)];
-  const routed = randomIncidentPosition(category);
-  const routing = INCIDENT_ROUTING[category];
+function spawnJob(template?: JobTemplate): Job {
+  const nextTemplate = template ?? jobQueue[queuedJobIndex % jobQueue.length];
+  queuedJobIndex += template ? 0 : 1;
 
-  const incident: Incident = {
-    id: `incident-${randomUUID().slice(0, 8)}`,
-    title:
-      category === "ci_failure"
-        ? "Pipeline red on default branch"
-        : category === "security_vuln"
-          ? "Critical dependency CVE detected"
-          : "API regression in production route",
-    category,
-    severity,
-    status: "open",
+  const routed = randomJobPosition(nextTemplate.category);
+  const routing = JOB_ROUTING[nextTemplate.category];
+
+  const job: Job = {
+    id: `job-${randomUUID().slice(0, 8)}`,
+    title: nextTemplate.title,
+    summary: nextTemplate.summary,
+    category: nextTemplate.category,
+    priority: nextTemplate.priority,
+    status: "queued",
     position: routed.position,
+    source: nextTemplate.source,
+    submitter: nextTemplate.submitter,
+    requestedSkills: nextTemplate.requestedSkills,
+    requiredTools: nextTemplate.requiredTools,
+    requiredTrust: nextTemplate.requiredTrust,
+    deliverable: nextTemplate.deliverable,
     retries: 0,
+    assignedAgentIds: [],
     timeline: []
   };
 
-  incidents.push(incident);
-  workflows.set(incident.id, { stage: 0, startedAtTick: tick });
-  cinematicFocus = incident.id;
+  jobs.push(job);
+  workflows.set(job.id, { stage: 0, startedAtTick: tick });
+  cinematicFocus = job.id;
 
-  addLog("decision", "scout-controller", "New incident discovered", {
-    incidentId: incident.id,
-    category,
-    severity,
-    position: incident.position,
+  addLog("decision", "job-board", "New job entered the city", {
+    jobId: job.id,
+    title: job.title,
+    category: job.category,
+    source: job.source,
+    submitter: job.submitter,
     district: routed.district.name,
     zone: routing.zoneName,
     rationale: routing.rationale
   });
+  addChat("job-board", "Job Board", `${job.title} arrived from ${job.submitter}. Routing to ${routing.zoneName}.`, "decision");
 
-  broadcast({ type: "incident_spawned", payload: incident });
-  return incident;
+  broadcast({ type: "job_submitted", payload: job });
+  return job;
 }
 
-function processIncidents(): void {
-  for (const incident of incidents) {
-    const workflow = workflows.get(incident.id);
+function processJobs(): void {
+  for (const job of jobs) {
+    const workflow = workflows.get(job.id);
     if (!workflow) {
       continue;
     }
 
-    if (incident.status === "resolved" || incident.status === "failed") {
+    if (job.status === "completed" || job.status === "failed") {
       continue;
     }
 
     if (budget.usedToolCalls >= budget.maxToolCalls) {
-      incident.status = "failed";
-      addLog("safety", "budget-guard", "Incident aborted due to tool-call budget exhaustion", {
-        incidentId: incident.id,
+      job.status = "failed";
+      job.outputSummary = "Aborted because the compute budget was exhausted";
+      addLog("safety", "budget-guard", "Job aborted due to tool-call budget exhaustion", {
+        jobId: job.id,
         usedToolCalls: budget.usedToolCalls
       });
       continue;
@@ -614,19 +873,15 @@ function processIncidents(): void {
     }
 
     if (!workflow.activeAgentId) {
-      const requiredRole = stageByIndex[workflow.stage].role;
-      const idleCandidates = findIdleAgentsByRole(requiredRole);
-      if (idleCandidates.length === 0) {
-        continue;
-      }
-      const assigned = allocateStageAgent(incident, workflow);
+      const assigned = allocateStageAgent(job, workflow);
       if (!assigned) {
-        incident.retries += 1;
-        if (incident.retries > budget.maxRetriesPerIncident) {
-          incident.status = "failed";
-          addLog("failure", "policy-engine", "Incident failed after trust gate retries", {
-            incidentId: incident.id,
-            retries: incident.retries
+        job.retries += 1;
+        if (job.retries > budget.maxRetriesPerJob) {
+          job.status = "failed";
+          job.outputSummary = "No eligible agent cleared trust and capability checks";
+          addLog("failure", "policy-engine", "Job failed after trust-gate retries", {
+            jobId: job.id,
+            retries: job.retries
           });
         }
       }
@@ -639,8 +894,8 @@ function processIncidents(): void {
       continue;
     }
 
-    if (navigation.distance(actor.position, incident.position) < 0.75 && actor.path.length === 0) {
-      completeStage(incident, workflow);
+    if (navigation.distance(actor.position, job.position) < 0.75 && actor.path.length === 0) {
+      completeStage(job, workflow);
     }
   }
 }
@@ -648,38 +903,150 @@ function processIncidents(): void {
 function runtimeGuardrails(): void {
   const runtimeSeconds = (Date.now() - loopStartedAt) / 1000;
   if (runtimeSeconds > budget.maxRuntimeSeconds) {
-    addLog("safety", "runtime-guard", "Runtime budget reached; holding incident intake", {
+    addLog("safety", "runtime-guard", "Runtime budget reached; holding job intake", {
       runtimeSeconds,
       maxRuntimeSeconds: budget.maxRuntimeSeconds
     });
   }
 }
 
+function inferPluginSpecialty(manifestInput: AgentManifest): string {
+  const firstSkill = manifestInput.primarySkills[0];
+  return firstSkill ? `${firstSkill} specialist` : "Specialist agent";
+}
+
+function registerPluginAgent(request: PluginRegistrationRequest): PluginAgentRecord {
+  const trustScore = request.trustScore ?? 0.78;
+  const record: PluginAgentRecord = {
+    id: `plugin-${randomUUID().slice(0, 8)}`,
+    status: trustScore >= TRUST_THRESHOLD && request.manifest.supportedTaskCategories.length > 0 ? "active" : "rejected",
+    label: request.label ?? request.manifest.agentName,
+    summary: request.summary ?? `Plugin agent for ${request.manifest.supportedTaskCategories.join(", ")}`,
+    preferredDistrictId: request.preferredDistrictId ?? "district-guild",
+    manifest: request.manifest,
+    operatorWallet: request.manifest.operatorWallet,
+    erc8004Identity: request.manifest.erc8004Identity,
+    trustScore,
+    reason: trustScore >= TRUST_THRESHOLD ? undefined : "Trust score below minimum threshold"
+  };
+
+  pluginAgents.push(record);
+
+  if (record.status === "active") {
+    const activeCount = agents.filter((agent) => agent.kind === "plugin").length;
+    agents.push({
+      id: record.id,
+      name: record.label,
+      role: "builder",
+      kind: "plugin",
+      phase: "idle",
+      trustScore: record.trustScore,
+      position: hubPoint("builder", { x: 14 + activeCount * 8, y: 8 - activeCount * 3 }),
+      target: hubPoint("builder", { x: 14 + activeCount * 8, y: 8 - activeCount * 3 }),
+      path: [],
+      energy: 1,
+      speed: 0.96 + activeCount * 0.03,
+      specialty: request.specialty ?? inferPluginSpecialty(request.manifest),
+      operatorWallet: record.operatorWallet,
+      erc8004Identity: record.erc8004Identity,
+      homeDistrictId: record.preferredDistrictId,
+      capabilities: capabilityProfile(
+        request.manifest.primarySkills,
+        request.manifest.supportedTaskCategories,
+        request.manifest.supportedTools,
+        1
+      ),
+      statusLine: "Awaiting marketplace jobs"
+    });
+
+    emitReceipt("identity_registry_registration", undefined, { pluginAgentId: record.id, operatorWallet: record.operatorWallet });
+    addLog("decision", "registry-plaza", "Plugin agent admitted to the city", {
+      pluginAgentId: record.id,
+      name: record.label,
+      trustScore: record.trustScore,
+      categories: request.manifest.supportedTaskCategories
+    });
+    addChat("registry-plaza", "Registry Plaza", `${record.label} cleared trust checks and joined the Guild District.`, "decision");
+  } else {
+    addLog("safety", "registry-plaza", "Plugin agent rejected during onboarding", {
+      pluginAgentId: record.id,
+      name: record.label,
+      trustScore: record.trustScore,
+      reason: record.reason
+    });
+    addChat("registry-plaza", "Registry Plaza", `${record.label} rejected: ${record.reason}.`, "warning");
+  }
+
+  broadcast({ type: "plugin_registered", payload: record });
+  return record;
+}
+
+function seedPlugins(): void {
+  registerPluginAgent({
+    label: "Move Sentinel",
+    summary: "Third-party plugin agent for Move smart contract tasks.",
+    trustScore: 0.93,
+    specialty: "Move smart contracts and protocol validation",
+    manifest: {
+      agentName: "Move Sentinel",
+      operatorWallet: "0x9aa4a0ef5A7b3BfA7f47C6e47fBbe9D5A0b3fEc9",
+      erc8004Identity: "agent:erc8004:move-sentinel",
+      supportedTools: ["move_cli", "test_runner", "github_api", "security_scanner"],
+      supportedTechStacks: ["Move", "Aptos", "TypeScript"],
+      computeConstraints: { maxToolCalls: 90, maxRuntimeSeconds: 600, retryLimit: 2 },
+      supportedTaskCategories: ["move_contract", "contract_audit"],
+      primarySkills: ["Move", "auditing", "formal review"],
+      executionMode: "plugin_adapter"
+    }
+  });
+
+  registerPluginAgent({
+    label: "QuickPatch Beta",
+    summary: "Low-trust plugin agent attempting to join the execution district.",
+    trustScore: 0.52,
+    specialty: "Low-cost patch automation",
+    manifest: {
+      agentName: "QuickPatch Beta",
+      operatorWallet: "0x1ff3f1E8b0B8000000000000000000000BadBeta",
+      erc8004Identity: "agent:erc8004:quickpatch-beta",
+      supportedTools: ["github_api", "git"],
+      supportedTechStacks: ["TypeScript"],
+      computeConstraints: { maxToolCalls: 40, maxRuntimeSeconds: 300, retryLimit: 1 },
+      supportedTaskCategories: ["github_bugfix"],
+      primarySkills: ["repo-fixes"],
+      executionMode: "plugin_adapter"
+    }
+  });
+}
+
 function mainLoop(): void {
   tick += 1;
 
   if (tick === 1) {
-    emitReceipt("identity_registry_registration");
-    emitReceipt("operator_link_validation");
-    spawnIncident();
+    emitReceipt("identity_registry_registration", undefined, { operatorWallet });
+    emitReceipt("operator_link_validation", undefined, { operatorWallet, erc8004Identity });
+    seedPlugins();
+    spawnJob();
+    spawnJob(jobQueue.find((job) => job.category === "move_contract"));
   }
 
-  if (tick % 80 === 0 && incidents.filter((incident) => incident.status === "open" || incident.status === "in_progress").length < 3) {
-    spawnIncident();
+  if (tick % 110 === 0 && jobs.filter((job) => job.status === "queued" || job.status === "negotiating" || job.status === "in_progress" || job.status === "verifying").length < 3) {
+    spawnJob();
   }
 
   runtimeGuardrails();
-  processIncidents();
+  processJobs();
   tickMovement();
 
   const snapshot = getSnapshot();
   broadcast({ type: "world_snapshot", payload: snapshot });
 
-  if (tick % 10 === 0) {
+  if (tick % 12 === 0) {
     addLog("state", "system", "Periodic state checkpoint", {
-      openIncidents: incidents.filter((incident) => incident.status === "open" || incident.status === "in_progress").length,
-      resolvedIncidents: incidents.filter((incident) => incident.status === "resolved").length,
-      failedIncidents: incidents.filter((incident) => incident.status === "failed").length,
+      openJobs: jobs.filter((job) => job.status !== "completed" && job.status !== "failed").length,
+      completedJobs: jobs.filter((job) => job.status === "completed").length,
+      failedJobs: jobs.filter((job) => job.status === "failed").length,
+      pluginAgents: pluginAgents.length,
       budget,
       focus: cinematicFocus
     });
@@ -702,17 +1069,45 @@ app.get("/agent_log.json", (_req, res) => {
   res.json(logs);
 });
 
+app.get("/plugins", (_req, res) => {
+  res.json(pluginAgents);
+});
+
+app.post("/plugins", (req, res) => {
+  const body = req.body as Partial<PluginRegistrationRequest>;
+  if (!body?.manifest?.agentName || !body.manifest.operatorWallet || !body.manifest.erc8004Identity) {
+    res.status(400).json({ ok: false, error: "manifest.agentName, operatorWallet, and erc8004Identity are required" });
+    return;
+  }
+
+  const record = registerPluginAgent({
+    manifest: body.manifest,
+    label: body.label,
+    summary: body.summary,
+    preferredDistrictId: body.preferredDistrictId,
+    trustScore: body.trustScore,
+    specialty: body.specialty
+  });
+
+  res.status(201).json({ ok: true, plugin: record });
+});
+
+app.get("/jobs", (_req, res) => {
+  res.json(jobs);
+});
+
 wss.on("connection", (socket) => {
   socket.send(JSON.stringify({ type: "world_snapshot", payload: getSnapshot() }));
 });
 
 server.listen(HTTP_PORT, async () => {
   await persistArtifacts();
-  addLog("decision", "system", "Orchestrator online", {
+  addLog("decision", "system", "Trust City Exchange orchestrator online", {
     port: HTTP_PORT,
     trustThreshold: TRUST_THRESHOLD,
     worldSeed: WORLD_SEED,
     stagePipeline: stageByIndex.map((stage) => stage.label)
   });
+  addChat("system", "System", "Trust City Exchange online. Waiting for jobs and plugin agents.", "decision");
   setInterval(mainLoop, LOOP_INTERVAL_MS);
 });

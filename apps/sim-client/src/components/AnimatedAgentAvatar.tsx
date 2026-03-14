@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Line, Text, useAnimations, useGLTF } from "@react-three/drei";
+import { Html, Line, Text, useAnimations, useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { clone } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { AGENT_COLORS, type AgentRuntimeState, type Incident } from "@trust-city/shared";
+import { AGENT_COLORS, type AgentRuntimeState, type ChatMessage, type Job } from "@trust-city/shared";
 
 interface Props {
   agent: AgentRuntimeState;
-  incident?: Incident;
+  job?: Job;
+  chat?: ChatMessage;
 }
 
 const PHASE_TO_CLIP: Record<string, string> = {
@@ -24,7 +25,7 @@ function worldPoint(position: { x: number; y: number }, y = 0.72): [number, numb
   return [position.x, y, position.y];
 }
 
-export default function AnimatedAgentAvatar({ agent, incident }: Props) {
+export default function AnimatedAgentAvatar({ agent, job, chat }: Props) {
   const rootRef = useRef<THREE.Group>(null);
   const auraRef = useRef<THREE.Mesh>(null);
   const clipRef = useRef<string>("Idle");
@@ -136,11 +137,11 @@ export default function AnimatedAgentAvatar({ agent, incident }: Props) {
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.15} />
       </mesh>
 
-      {incident ? (
+      {job ? (
         <Line
           points={[
             [0, 0.38, 0],
-            [incident.position.x - agent.position.x, 0.3, incident.position.y - agent.position.y]
+            [job.position.x - agent.position.x, 0.3, job.position.y - agent.position.y]
           ]}
           color={color}
           dashed
@@ -153,9 +154,21 @@ export default function AnimatedAgentAvatar({ agent, incident }: Props) {
         />
       ) : null}
 
-      <Text position={[0, 1.02, 0]} fontSize={0.15} color="#e8f1ff" anchorX="center" anchorY="bottom" maxWidth={4}>
+      <Text position={[0, 1.04, 0]} fontSize={0.15} color="#e8f1ff" anchorX="center" anchorY="bottom" maxWidth={4}>
         {agent.name}
       </Text>
+      <Text position={[0, 0.89, 0]} fontSize={0.09} color="#92b7e4" anchorX="center" anchorY="bottom" maxWidth={5.4}>
+        {agent.statusLine ?? agent.specialty}
+      </Text>
+
+      {chat ? (
+        <Html position={[0, 1.55, 0]} center distanceFactor={12}>
+          <div className={`world-tag world-tag-chat ${chat.tone === "warning" ? "world-tag-chat-warning" : "world-tag-chat-decision"}`}>
+            <p>{chat.actorName}</p>
+            <span>{chat.message}</span>
+          </div>
+        </Html>
+      ) : null}
     </group>
   );
 }
