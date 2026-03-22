@@ -5,7 +5,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import * as THREE from "three";
 import { AGENT_COLORS, type ChatMessage, type Job, type Vec2, type WorldSnapshot } from "@trust-city/shared";
-import { buildStreamedCity, CHUNK_SIZE } from "../city/generator";
+import { buildStreamedCity, CHUNK_SIZE, type CityStructure } from "../city/generator";
 import { DistrictOverlay, DynamicRoads, JobBeacon, PluginRegistryBoard, RoleHubLandmarks, StructureBlock, TrafficLanes } from "../city/layers";
 import AnimatedAgentAvatar from "./AnimatedAgentAvatar";
 
@@ -18,6 +18,11 @@ interface Props {
 
 const USER_CONTROL_PAUSE_MS = 9000;
 const ACTIVE_CHAT_MS = 9000;
+const FOLLOW_CAMERA_DISTANCE = 12;
+const FOLLOW_CAMERA_HEIGHT = 6.5;
+const FOLLOW_CAMERA_SHOULDER = 2.4;
+const FOLLOW_LOOK_AHEAD = 5.5;
+const FOLLOW_LOOK_HEIGHT = 2.6;
 
 function toPathPoint(position: Vec2): [number, number, number] {
   return [position.x, 0.35, position.y];
@@ -86,22 +91,82 @@ function agentLookVector(agent: WorldSnapshot["agents"][number]): THREE.Vector3 
 
 function getFollowCameraPosition(agent: WorldSnapshot["agents"][number]): THREE.Vector3 {
   const forward = agentLookVector(agent);
-  const behind = forward.clone().multiplyScalar(-7.2);
-  return new THREE.Vector3(agent.position.x + behind.x, 4.8, agent.position.y + behind.z);
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+  const behind = forward.clone().multiplyScalar(-FOLLOW_CAMERA_DISTANCE);
+  const shoulder = right.multiplyScalar(FOLLOW_CAMERA_SHOULDER);
+  return new THREE.Vector3(agent.position.x + behind.x + shoulder.x, FOLLOW_CAMERA_HEIGHT, agent.position.y + behind.z + shoulder.z);
+}
+
+function getFollowTargetPosition(agent: WorldSnapshot["agents"][number]): THREE.Vector3 {
+  const forward = agentLookVector(agent);
+  return new THREE.Vector3(
+    agent.position.x + forward.x * FOLLOW_LOOK_AHEAD,
+    FOLLOW_LOOK_HEIGHT,
+    agent.position.y + forward.z * FOLLOW_LOOK_AHEAD
+  );
+}
+
+function collidableStructures(structures: CityStructure[]): CityStructure[] {
+  return structures.filter((structure) => structure.kind !== "park" && structure.kind !== "tree");
+}
+
+function structureBox(structure: CityStructure): THREE.Box3 {
+  return new THREE.Box3(
+    new THREE.Vector3(structure.x - structure.width / 2, 0, structure.z - structure.depth / 2),
+    new THREE.Vector3(structure.x + structure.width / 2, structure.height, structure.z + structure.depth / 2)
+  );
+}
+
+function resolveCameraObstruction(
+  desiredCamera: THREE.Vector3,
+  lookTarget: THREE.Vector3,
+  structures: CityStructure[]
+): THREE.Vector3 {
+  const direction = desiredCamera.clone().sub(lookTarget);
+  const distance = direction.length();
+  if (distance < 0.001) {
+    return desiredCamera;
+  }
+
+  const ray = new THREE.Ray(lookTarget.clone(), direction.clone().normalize());
+  let nearestHit = distance;
+
+  for (const structure of structures) {
+    const hit = ray.intersectBox(structureBox(structure), new THREE.Vector3());
+    if (!hit) {
+      continue;
+    }
+    const hitDistance = hit.distanceTo(lookTarget);
+    if (hitDistance < nearestHit) {
+      nearestHit = hitDistance;
+    }
+  }
+
+  if (nearestHit >= distance) {
+    return desiredCamera;
+  }
+
+  const safeDistance = Math.max(4.8, nearestHit - 1.8);
+  const adjusted = lookTarget.clone().add(direction.normalize().multiplyScalar(safeDistance));
+  adjusted.y = Math.max(adjusted.y, FOLLOW_CAMERA_HEIGHT * 0.72);
+  return adjusted;
 }
 
 function CameraDirector({
   snapshot,
   selectedAgentId,
+  streamedStructures,
   controlsRef,
   autoPausedUntilRef
 }: {
   snapshot: WorldSnapshot | null;
   selectedAgentId?: string | null;
+  streamedStructures: CityStructure[];
   controlsRef: RefObject<OrbitControlsImpl | null>;
   autoPausedUntilRef: MutableRefObject<number>;
 }) {
   const targetRef = useRef(new THREE.Vector3(0, 1.2, 1));
+  const cameraRef = useRef(new THREE.Vector3(24, 20, 24));
 
   useFrame((_, delta) => {
     const controls = controlsRef.current;
@@ -116,11 +181,12 @@ function CameraDirector({
     if (selectedAgentId) {
       const agent = snapshot.agents.find((candidate) => candidate.id === selectedAgentId);
       if (agent) {
-        const followTarget = new THREE.Vector3(agent.position.x, 1.9, agent.position.y);
-        const followCamera = getFollowCameraPosition(agent);
-        targetRef.current.lerp(followTarget, Math.min(1, delta * 4.2));
+        const desiredTarget = getFollowTargetPosition(agent);
+        const desiredCamera = resolveCameraObstruction(getFollowCameraPosition(agent), desiredTarget, streamedStructures);
+        targetRef.current.lerp(desiredTarget, Math.min(1, delta * 4.6));
+        cameraRef.current.lerp(desiredCamera, Math.min(1, delta * 2.8));
         controls.target.copy(targetRef.current);
-        controls.object.position.lerp(followCamera, Math.min(1, delta * 3.2));
+        controls.object.position.copy(cameraRef.current);
         controls.update();
         return;
       }
@@ -286,6 +352,7 @@ export default function WorldScene({ snapshot, selectedAgentId, followAgentId, f
   const streamedCity = useMemo(() => {
     return buildStreamedCity(snapshot?.worldSeed ?? 271828, streamAnchor, snapshot?.districts ?? []);
   }, [snapshot?.worldSeed, snapshot?.districts, streamAnchor.x, streamAnchor.y]);
+  const colliders = useMemo(() => collidableStructures(streamedCity.near), [streamedCity.near]);
 
   const [trailMap, setTrailMap] = useState<Record<string, Array<[number, number, number]>>>({});
 
@@ -329,11 +396,12 @@ export default function WorldScene({ snapshot, selectedAgentId, followAgentId, f
 
     autoPausedUntilRef.current = 0;
     lastFocusNonceRef.current = focusNonce;
-    const followCamera = getFollowCameraPosition(agent);
-    controls.target.set(agent.position.x, 1.9, agent.position.y);
+    const followTarget = getFollowTargetPosition(agent);
+    const followCamera = resolveCameraObstruction(getFollowCameraPosition(agent), followTarget, colliders);
+    controls.target.copy(followTarget);
     controls.object.position.copy(followCamera);
     controls.update();
-  }, [snapshot, selectedAgentId, focusNonce]);
+  }, [snapshot, selectedAgentId, focusNonce, colliders]);
 
   return (
     <Canvas
@@ -458,7 +526,7 @@ export default function WorldScene({ snapshot, selectedAgentId, followAgentId, f
         </group>
       ))}
 
-      <CameraDirector snapshot={snapshot} selectedAgentId={followAgentId} controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
+      <CameraDirector snapshot={snapshot} selectedAgentId={followAgentId} streamedStructures={colliders} controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
       <FreeRoamController controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
       <StreamAnchorController controlsRef={controlsRef} onAnchorChunkChange={setStreamAnchor} />
       <OrbitControls

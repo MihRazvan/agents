@@ -184,7 +184,9 @@ export default function App() {
       <main className="layout">
         <section className="scene-column">
           <section className="scene-panel">
-            <WorldScene snapshot={snapshot} selectedAgentId={selectedAgentId} followAgentId={followAgentId} focusNonce={focusNonce} />
+            <div className="scene-canvas-shell">
+              <WorldScene snapshot={snapshot} selectedAgentId={selectedAgentId} followAgentId={followAgentId} focusNonce={focusNonce} />
+            </div>
             <div className="scene-chat-overlay">
               <div className="scene-chat-head">
                 <h2>Live Chat</h2>
