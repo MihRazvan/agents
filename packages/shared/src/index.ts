@@ -132,6 +132,10 @@ export interface ChatMessage {
   timestamp: string;
   actorId: string;
   actorName: string;
+  recipientId?: string;
+  recipientName?: string;
+  jobId?: string;
+  kind: "status" | "handoff" | "tool" | "trust" | "verification" | "delivery";
   tone: "info" | "decision" | "warning";
   message: string;
 }

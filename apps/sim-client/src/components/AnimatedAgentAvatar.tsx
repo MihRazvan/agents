@@ -9,6 +9,7 @@ interface Props {
   agent: AgentRuntimeState;
   job?: Job;
   chat?: ChatMessage;
+  selected?: boolean;
 }
 
 const PHASE_TO_CLIP: Record<string, string> = {
@@ -25,7 +26,7 @@ function worldPoint(position: { x: number; y: number }, y = 0.92): [number, numb
   return [position.x, y, position.y];
 }
 
-export default function AnimatedAgentAvatar({ agent, job, chat }: Props) {
+export default function AnimatedAgentAvatar({ agent, job, chat, selected = false }: Props) {
   const rootRef = useRef<THREE.Group>(null);
   const auraRef = useRef<THREE.Mesh>(null);
   const clipRef = useRef<string>("Idle");
@@ -118,7 +119,7 @@ export default function AnimatedAgentAvatar({ agent, job, chat }: Props) {
 
     if (auraRef.current) {
       const pulse = 0.82 + Math.sin(clock.getElapsedTime() * 2.6) * 0.12;
-      const scale = pulse + agent.trustScore * 0.42;
+      const scale = pulse + agent.trustScore * 0.42 + (selected ? 0.28 : 0);
       auraRef.current.scale.set(scale, scale, 1);
     }
   });
@@ -130,10 +131,17 @@ export default function AnimatedAgentAvatar({ agent, job, chat }: Props) {
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.18} transparent opacity={0.35 + agent.trustScore * 0.2} />
       </mesh>
 
-      <primitive object={model} position={[0, -0.8, 0]} scale={[0.48, 0.48, 0.48]} />
+      {selected ? (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.8, 0]}>
+          <ringGeometry args={[0.84, 0.94, 42]} />
+          <meshStandardMaterial color="#f5f8ff" emissive="#b9e8ff" emissiveIntensity={1.2} transparent opacity={0.7} />
+        </mesh>
+      ) : null}
 
-      <mesh position={[0, 0.96, 0]}>
-        <sphereGeometry args={[0.1, 14, 14]} />
+      <primitive object={model} position={[0, -0.92, 0]} scale={[0.6, 0.6, 0.6]} />
+
+      <mesh position={[0, 1.14, 0]}>
+        <sphereGeometry args={[0.12, 16, 16]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.15} />
       </mesh>
 
@@ -154,17 +162,17 @@ export default function AnimatedAgentAvatar({ agent, job, chat }: Props) {
         />
       ) : null}
 
-      <Text position={[0, 1.36, 0]} fontSize={0.19} color="#e8f1ff" anchorX="center" anchorY="bottom" maxWidth={4.8}>
+      <Text position={[0, 1.68, 0]} fontSize={0.24} color="#f3f8ff" anchorX="center" anchorY="bottom" maxWidth={5.8}>
         {agent.name}
       </Text>
-      <Text position={[0, 1.15, 0]} fontSize={0.11} color="#92b7e4" anchorX="center" anchorY="bottom" maxWidth={6.2}>
+      <Text position={[0, 1.4, 0]} fontSize={0.13} color="#9bc0ea" anchorX="center" anchorY="bottom" maxWidth={6.8}>
         {agent.statusLine ?? agent.specialty}
       </Text>
 
       {chat ? (
-        <Html position={[0, 2.05, 0]} center distanceFactor={10}>
+        <Html position={[0, 2.45, 0]} center distanceFactor={8}>
           <div className={`world-tag world-tag-chat ${chat.tone === "warning" ? "world-tag-chat-warning" : "world-tag-chat-decision"}`}>
-            <p>{chat.actorName}</p>
+            <p>{chat.recipientName ? `${chat.actorName} -> ${chat.recipientName}` : chat.actorName}</p>
             <span>{chat.message}</span>
           </div>
         </Html>

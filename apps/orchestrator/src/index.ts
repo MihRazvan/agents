@@ -367,17 +367,40 @@ function addLog(
   void persistArtifacts();
 }
 
-function addChat(actorId: string, actorName: string, message: string, tone: ChatMessage["tone"] = "info"): void {
+function addChat(
+  actorId: string,
+  actorName: string,
+  message: string,
+  tone: ChatMessage["tone"] = "info",
+  extra?: Partial<Pick<ChatMessage, "recipientId" | "recipientName" | "jobId" | "kind">>
+): void {
   const chat: ChatMessage = {
     id: randomUUID(),
     timestamp: nowIso(),
     actorId,
     actorName,
+    recipientId: extra?.recipientId,
+    recipientName: extra?.recipientName,
+    jobId: extra?.jobId,
+    kind: extra?.kind ?? "status",
     tone,
     message
   };
   chats.push(chat);
   trimChats();
+}
+
+function findAgent(agentId?: string): AgentRuntimeState | undefined {
+  return agentId ? agents.find((candidate) => candidate.id === agentId) : undefined;
+}
+
+function addHandoffChat(from: AgentRuntimeState, to: AgentRuntimeState, job: Job, message: string): void {
+  addChat(from.id, from.name, message, "decision", {
+    recipientId: to.id,
+    recipientName: to.name,
+    jobId: job.id,
+    kind: "handoff"
+  });
 }
 
 function receiptExplorerUrl(txHash: string): string {
@@ -645,6 +668,7 @@ function findCapableAgents(role: AgentRole, job: Job): AgentRuntimeState[] {
 
 function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState | null {
   const step = stageByIndex[workflow.stage];
+  const previousActor = findAgent(job.ownerAgentId);
   const candidates = findEligibleAgents(step.role, job);
   const candidate = candidates[0] ?? null;
 
@@ -661,7 +685,10 @@ function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState 
       category: job.category,
       threshold: stageTrustThreshold(step.role, job)
     });
-    addChat("policy-engine", "Policy Engine", `${JOB_ROUTING[job.category].label} paused. No eligible ${step.role} cleared trust and capability checks.`, "warning");
+    addChat("policy-engine", "Policy Engine", `${JOB_ROUTING[job.category].label} paused. No eligible ${step.role} cleared trust and capability checks.`, "warning", {
+      jobId: job.id,
+      kind: "trust"
+    });
     return null;
   }
 
@@ -684,7 +711,20 @@ function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState 
     kind: candidate.kind,
     color: AGENT_COLORS[candidate.role]
   });
-  addChat(candidate.id, candidate.name, `${step.label === "execute" ? "Taking" : "Claiming"} ${JOB_ROUTING[job.category].label} for ${step.label}.`, "decision");
+  if (previousActor && previousActor.id !== candidate.id) {
+    addHandoffChat(previousActor, candidate, job, `Handing ${JOB_ROUTING[job.category].label} to ${candidate.name} for ${step.label}.`);
+    addChat(candidate.id, candidate.name, `Received ${JOB_ROUTING[job.category].label}. Starting ${step.label}.`, "decision", {
+      recipientId: previousActor.id,
+      recipientName: previousActor.name,
+      jobId: job.id,
+      kind: "handoff"
+    });
+  } else {
+    addChat(candidate.id, candidate.name, `${step.label === "execute" ? "Taking" : "Claiming"} ${JOB_ROUTING[job.category].label} for ${step.label}.`, "decision", {
+      jobId: job.id,
+      kind: "status"
+    });
+  }
 
   return candidate;
 }
@@ -710,7 +750,10 @@ function runToolCall(step: { label: string; key: AgentPhase }, actor: AgentRunti
     usedToolCalls: budget.usedToolCalls,
     maxToolCalls: budget.maxToolCalls
   });
-  addChat(actor.id, actor.name, `${step.label === "execute" ? "Running" : "Using"} ${preferredTool} on ${JOB_ROUTING[job.category].label}.`);
+  addChat(actor.id, actor.name, `${step.label === "execute" ? "Running" : "Using"} ${preferredTool} on ${JOB_ROUTING[job.category].label}.`, "info", {
+    jobId: job.id,
+    kind: "tool"
+  });
 
   const failed = Math.random() < stageFailureChance(workflows.get(job.id)?.stage ?? 0, job, actor);
   if (!failed) {
@@ -725,7 +768,10 @@ function runToolCall(step: { label: string; key: AgentPhase }, actor: AgentRunti
     retries: job.retries,
     retryLimit: budget.maxRetriesPerJob
   });
-  addChat(actor.id, actor.name, `Tool output failed verification. Re-queuing ${JOB_ROUTING[job.category].label}.`, "warning");
+  addChat(actor.id, actor.name, `Tool output failed verification. Re-queuing ${JOB_ROUTING[job.category].label}.`, "warning", {
+    jobId: job.id,
+    kind: "verification"
+  });
 
   if (job.retries > budget.maxRetriesPerJob) {
     job.status = "failed";
@@ -767,7 +813,10 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
     if (job.status === "failed") {
       setAgentIdle(actor.id);
       workflow.activeAgentId = undefined;
-      addChat("system", "System", `${job.title} failed after exhausting retries.`, "warning");
+      addChat("system", "System", `${job.title} failed after exhausting retries.`, "warning", {
+        jobId: job.id,
+        kind: "verification"
+      });
       return;
     }
 
@@ -775,7 +824,13 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
     workflow.activeAgentId = undefined;
     if (step.key === "verify" && workflow.stage > 1) {
       workflow.stage = 2;
-      addChat("agent-verifier-1", "Verifier Echo", "Sending work back to execution for correction.", "warning");
+      const builder = findAgent(job.assignedAgentIds.find((agentId) => findAgent(agentId)?.role === "builder"));
+      addChat("agent-verifier-1", "Verifier Echo", "Sending work back to execution for correction.", "warning", {
+        recipientId: builder?.id,
+        recipientName: builder?.name,
+        jobId: job.id,
+        kind: "handoff"
+      });
     }
     return;
   }
@@ -787,7 +842,13 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
   });
 
   if (step.key === "plan") {
-    addChat(actor.id, actor.name, `Plan ready. Needs ${job.requestedSkills.join(", ")} with trust >= ${job.requiredTrust.toFixed(2)}.`, "decision");
+    const topBuilder = findCapableAgents("builder", job)[0];
+    addChat(actor.id, actor.name, `Plan ready. Needs ${job.requestedSkills.join(", ")} with trust >= ${job.requiredTrust.toFixed(2)}.`, "decision", {
+      recipientId: topBuilder?.id,
+      recipientName: topBuilder?.name,
+      jobId: job.id,
+      kind: "handoff"
+    });
   }
 
   if (step.key === "verify") {
@@ -797,7 +858,13 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
     } else if (!onchain.enabled) {
       emitLocalReceipt("validation_registry_write", job.id, { validator: actor.id });
     }
-    addChat(actor.id, actor.name, `Validation passed for ${JOB_ROUTING[job.category].label}.`, "decision");
+    const publisher = findCapableAgents("publisher", job)[0];
+    addChat(actor.id, actor.name, `Validation passed for ${JOB_ROUTING[job.category].label}.`, "decision", {
+      recipientId: publisher?.id,
+      recipientName: publisher?.name,
+      jobId: job.id,
+      kind: "verification"
+    });
   }
 
   if (step.key === "submit") {
@@ -813,7 +880,12 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
       finalTimeline: job.timeline,
       outputSummary: job.outputSummary
     });
-    addChat(actor.id, actor.name, `Delivery sealed. ${job.outputSummary}.`, "decision");
+    addChat(actor.id, actor.name, `Delivery sealed. ${job.outputSummary}.`, "decision", {
+      recipientId: "job-board",
+      recipientName: job.submitter,
+      jobId: job.id,
+      kind: "delivery"
+    });
     cinematicFocus = job.id;
     broadcast({ type: "job_completed", payload: job });
     setAgentIdle(actor.id);
@@ -924,7 +996,13 @@ function spawnJob(template?: JobTemplate): Job {
     zone: routing.zoneName,
     rationale: routing.rationale
   });
-  addChat("job-board", "Job Board", `${job.title} arrived from ${job.submitter}. Routing to ${routing.zoneName}.`, "decision");
+  const scout = findCapableAgents("scout", job)[0];
+  addChat("job-board", "Job Board", `${job.title} arrived from ${job.submitter}. Routing to ${routing.zoneName}.`, "decision", {
+    recipientId: scout?.id,
+    recipientName: scout?.name,
+    jobId: job.id,
+    kind: "handoff"
+  });
 
   broadcast({ type: "job_submitted", payload: job });
   return job;
@@ -1066,7 +1144,11 @@ function registerPluginAgent(request: PluginRegistrationRequest): PluginAgentRec
       trustScore: record.trustScore,
       categories: request.manifest.supportedTaskCategories
     });
-    addChat("registry-plaza", "Registry Plaza", `${record.label} cleared trust checks and joined the Guild District.`, "decision");
+    addChat("registry-plaza", "Registry Plaza", `${record.label} cleared trust checks and joined the Guild District.`, "decision", {
+      recipientId: record.id,
+      recipientName: record.label,
+      kind: "trust"
+    });
   } else {
     addLog("safety", "registry-plaza", "Plugin agent rejected during onboarding", {
       pluginAgentId: record.id,
@@ -1074,7 +1156,11 @@ function registerPluginAgent(request: PluginRegistrationRequest): PluginAgentRec
       trustScore: record.trustScore,
       reason: record.reason
     });
-    addChat("registry-plaza", "Registry Plaza", `${record.label} rejected: ${record.reason}.`, "warning");
+    addChat("registry-plaza", "Registry Plaza", `${record.label} rejected: ${record.reason}.`, "warning", {
+      recipientId: record.id,
+      recipientName: record.label,
+      kind: "trust"
+    });
   }
 
   broadcast({ type: "plugin_registered", payload: record });
@@ -1223,6 +1309,6 @@ server.listen(HTTP_PORT, async () => {
     worldSeed: WORLD_SEED,
     stagePipeline: stageByIndex.map((stage) => stage.label)
   });
-  addChat("system", "System", "Trust City Exchange online. Waiting for jobs and plugin agents.", "decision");
+  addChat("system", "System", "Trust City Exchange online. Waiting for jobs and plugin agents.", "decision", { kind: "status" });
   setInterval(mainLoop, LOOP_INTERVAL_MS);
 });

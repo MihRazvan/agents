@@ -130,24 +130,24 @@ export function DynamicRoads({ roads }: { roads: RoadLine[] }) {
   );
 }
 
-export function DistrictOverlay({ snapshot }: { snapshot: WorldSnapshot }) {
+export function DistrictOverlay({ snapshot, selectedAgentId }: { snapshot: WorldSnapshot; selectedAgentId?: string | null }) {
+  const selectedAgent = selectedAgentId ? snapshot.agents.find((agent) => agent.id === selectedAgentId) : undefined;
   return (
     <group>
       {snapshot.districts.map((district) => {
         const semantics = DISTRICT_THEME_PURPOSE[district.theme];
         const hue = district.theme === "core" ? "#59e4ff" : district.theme === "industrial" ? "#ff8f66" : district.theme === "research" ? "#89a0ff" : "#89ffb3";
-        const preferred = semantics.preferredCategories.map((category) => JOB_ROUTING[category].label).join(", ");
+        const isSelectedHome = selectedAgent?.homeDistrictId === district.id;
         return (
           <group key={district.id} position={[district.center.x, 0, district.center.y]}>
             <mesh rotation={[-Math.PI / 2, 0, 0]}>
               <ringGeometry args={[district.radius - 0.14, district.radius, 64]} />
-              <meshStandardMaterial color={hue} emissive={hue} emissiveIntensity={0.65} transparent opacity={0.25} />
+              <meshStandardMaterial color={hue} emissive={hue} emissiveIntensity={0.65} transparent opacity={isSelectedHome ? 0.4 : 0.14} />
             </mesh>
             <Html position={[0, 0.24, district.radius + 0.86]} center>
-              <div className="world-tag world-tag-district">
+              <div className={`world-tag world-tag-district ${isSelectedHome ? "world-tag-district-active" : ""}`}>
                 <p>{district.name}</p>
-                <span>{semantics.purpose}</span>
-                <span>{`Best for: ${preferred}`}</span>
+                <span>{isSelectedHome ? semantics.purpose : `${JOB_ROUTING[semantics.preferredCategories[0]].label} zone`}</span>
               </div>
             </Html>
           </group>
@@ -178,7 +178,6 @@ export function RoleHubLandmarks() {
             <Html position={[0, 1.08, 0]} center>
               <div className="world-tag world-tag-hub">
                 <p>{hub.name}</p>
-                <span>{hub.purpose}</span>
               </div>
             </Html>
           </group>
@@ -310,8 +309,7 @@ export function JobBeacon({ job }: { job: Job }) {
       <Html position={[0, 1.05, 0]} center>
         <div className="world-tag world-tag-job">
           <p>{job.title}</p>
-          <span>{routing.zoneName}</span>
-          <span>{`${routing.label} | ${job.submitter}`}</span>
+          <span>{`${routing.label} | ${job.status.replace(/_/g, " ")}`}</span>
         </div>
       </Html>
     </group>

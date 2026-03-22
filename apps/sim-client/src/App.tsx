@@ -3,6 +3,7 @@ import {
   JOB_ROUTING,
   ROLE_HUBS,
   type AgentManifest,
+  type ChatMessage,
   type LogEntry,
   type OnchainStatus,
   type PluginAgentRecord,
@@ -38,6 +39,9 @@ export default function App() {
   const [plugins, setPlugins] = useState<PluginAgentRecord[]>([]);
   const [wsStatus, setWsStatus] = useState<"connecting" | "live" | "offline">("connecting");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [followAgentId, setFollowAgentId] = useState<string | null>(null);
+  const [focusNonce, setFocusNonce] = useState(0);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -152,6 +156,17 @@ export default function App() {
 
   const onchainStatus: OnchainStatus | null = snapshot?.onchainStatus ?? null;
   const recentChats = useMemo(() => [...(snapshot?.chats ?? [])].slice(-18).reverse(), [snapshot?.chats]);
+  const selectedAgent = useMemo(() => (snapshot?.agents ?? []).find((agent) => agent.id === selectedAgentId) ?? null, [snapshot?.agents, selectedAgentId]);
+
+  function focusAgent(agentId: string): void {
+    setSelectedAgentId(agentId);
+    setFocusNonce((current) => current + 1);
+    setFollowAgentId(agentId);
+  }
+
+  function formatChatHeader(chat: ChatMessage): string {
+    return chat.recipientName ? `${chat.actorName} -> ${chat.recipientName}` : chat.actorName;
+  }
 
   return (
     <div className="app-shell">
@@ -169,25 +184,20 @@ export default function App() {
       <main className="layout">
         <section className="scene-column">
           <section className="scene-panel">
-            <WorldScene snapshot={snapshot} selectedAgentId={selectedAgentId} />
-          </section>
-
-          <section className="card chat-panel">
-            <div className="section-head">
-              <h2>Agent Chat</h2>
-              <p className="section-note">Live handoffs, coordination, and trust decisions.</p>
-            </div>
-            <div className="chat-list">
-              {recentChats.length === 0 ? (
-                <p className="chat-empty">No agent messages yet.</p>
-              ) : (
-                recentChats.map((chat) => (
-                  <div key={chat.id} className={`chat-item chat-item-${chat.tone}`}>
-                    <p className="chat-actor">{chat.actorName}</p>
-                    <p className="chat-message">{chat.message}</p>
+            <WorldScene snapshot={snapshot} selectedAgentId={selectedAgentId} followAgentId={followAgentId} focusNonce={focusNonce} />
+            <div className="scene-chat-overlay">
+              <div className="scene-chat-head">
+                <h2>Live Chat</h2>
+                <p>{followAgentId ? `Following ${selectedAgent?.name ?? "agent"}` : "Auto-follow armed"}</p>
+              </div>
+              <div className="scene-chat-list">
+                {recentChats.slice(0, 8).map((chat) => (
+                  <div key={chat.id} className={`scene-chat-item scene-chat-item-${chat.tone}`}>
+                    <p className="scene-chat-actor">{formatChatHeader(chat)}</p>
+                    <span className="scene-chat-message">{chat.message}</span>
                   </div>
-                ))
-              )}
+                ))}
+              </div>
             </div>
           </section>
         </section>
@@ -222,14 +232,18 @@ export default function App() {
           </section>
 
           <section className="card roster-card">
-            <h2>Agent Roster</h2>
+            <div className="section-head">
+              <h2>Agent Roster</h2>
+              <p className="section-note">{followAgentId ? `Camera locked to ${selectedAgent?.name ?? "agent"}` : "Click to jump behind and follow."}</p>
+            </div>
             <div className="roster-list">
               {(snapshot?.agents ?? []).map((agent) => (
                 <button
                   type="button"
                   className={`roster-item ${selectedAgentId === agent.id ? "roster-item-active" : ""}`}
                   key={agent.id}
-                  onClick={() => setSelectedAgentId(agent.id)}
+                  onClick={() => focusAgent(agent.id)}
+                  onDoubleClick={() => focusAgent(agent.id)}
                 >
                   <div>
                     <p className="agent-name">{agent.name}</p>
@@ -246,118 +260,126 @@ export default function App() {
             </div>
           </section>
 
-          <section className="card manifest-card">
-            <h2>City Operator</h2>
-            <p className="manifest-item">
-              <span>Name:</span> {manifest?.agentName ?? "loading"}
-            </p>
-            <p className="manifest-item">
-              <span>Operator:</span> {manifest?.operatorWallet ?? "loading"}
-            </p>
-            <p className="manifest-item">
-              <span>ERC-8004 ID:</span> {manifest?.erc8004Identity ?? "loading"}
-            </p>
-            <p className="manifest-item">
-              <span>Mode:</span> Plugin-enabled trust marketplace
-            </p>
-          </section>
+          <button type="button" className="advanced-toggle" onClick={() => setAdvancedOpen((current) => !current)}>
+            {advancedOpen ? "Hide Advanced" : "Show Advanced"}
+          </button>
 
-          <section className="card manifest-card">
-            <h2>Onchain Status</h2>
-            <p className="manifest-item">
-              <span>Writes:</span> {onchainStatus?.enabled ? "Live on Sepolia" : "Simulated only"}
-            </p>
-            <p className="manifest-item">
-              <span>Reputation:</span> {onchainStatus?.reputationEnabled ? "Enabled" : "Disabled"}
-            </p>
-            <p className="manifest-item">
-              <span>Validation:</span>{" "}
-              {onchainStatus?.validationEnabled
-                ? "Enabled"
-                : onchainStatus?.validationRequested
-                  ? "Requested but unavailable"
-                  : "Disabled"}
-            </p>
-            {!onchainStatus?.validationEnabled && onchainStatus?.validationReason ? (
-              <p className="manifest-item">
-                <span>Validation Note:</span> {onchainStatus.validationReason}
-              </p>
-            ) : null}
-            <p className="manifest-item">
-              <span>Chain:</span> {onchainStatus?.network ?? "ethereum-sepolia"} ({onchainStatus?.chainId ?? "11155111"})
-            </p>
-            <p className="manifest-item">
-              <span>Feedback Wallet:</span> {onchainStatus?.feedbackWallet ?? "not configured"}
-            </p>
-            {!onchainStatus?.enabled && onchainStatus?.disabledReason ? (
-              <p className="manifest-item">
-                <span>Reason:</span> {onchainStatus.disabledReason}
-              </p>
-            ) : null}
-            <p className="manifest-item">
-              <span>Agent ID:</span> {onchainStatus?.identityAgentId ?? "pending"}
-            </p>
-          </section>
-
-          <section className="card manifest-card">
-            <h2>Plugin Dock</h2>
-            <div className="feed-list">
-              {plugins.map((plugin) => (
-                <p key={plugin.id} className={plugin.status === "rejected" ? "log-failure" : "log-onchain"}>
-                  [{plugin.status}] {plugin.label}: {plugin.summary}
+          {advancedOpen ? (
+            <>
+              <section className="card manifest-card">
+                <h2>City Operator</h2>
+                <p className="manifest-item">
+                  <span>Name:</span> {manifest?.agentName ?? "loading"}
                 </p>
-              ))}
-            </div>
-            <p className="budget-line">POST {httpBase}/plugins to plug your agent into the city.</p>
-          </section>
-
-          <section className="card manifest-card">
-            <h2>Live Jobs</h2>
-            <div className="feed-list">
-              {(snapshot?.jobs ?? []).map((job) => (
-                <p key={job.id} className={job.status === "failed" ? "log-failure" : job.status === "completed" ? "log-onchain" : "log-decision"}>
-                  [{formatStatus(job.status)}] {job.title}
-                  <br />
-                  {JOB_ROUTING[job.category].label} | {job.submitter} | Trust {job.requiredTrust.toFixed(2)}
+                <p className="manifest-item">
+                  <span>Operator:</span> {manifest?.operatorWallet ?? "loading"}
                 </p>
-              ))}
-            </div>
-          </section>
+                <p className="manifest-item">
+                  <span>ERC-8004 ID:</span> {manifest?.erc8004Identity ?? "loading"}
+                </p>
+                <p className="manifest-item">
+                  <span>Mode:</span> Plugin-enabled trust marketplace
+                </p>
+              </section>
 
-          <section className="card receipt-card">
-            <h2>Onchain Receipts</h2>
-            <div className="receipt-list">
-              {receipts.map((receipt) => (
-                <div key={receipt.id} className="receipt-item">
-                  <p className={`receipt-mode receipt-mode-${receipt.mode}`}>{receipt.mode === "onchain" ? "live" : "sim"}</p>
-                  <div>
-                    <p className="receipt-action">{receipt.action.replace(/_/g, " ")}</p>
-                    <p className="receipt-hash">
-                      {receipt.explorerUrl ? (
-                        <a href={receipt.explorerUrl} target="_blank" rel="noreferrer">
-                          {shortHash(receipt.txHash)}
-                        </a>
-                      ) : (
-                        shortHash(receipt.txHash)
-                      )}
+              <section className="card manifest-card">
+                <h2>Onchain Status</h2>
+                <p className="manifest-item">
+                  <span>Writes:</span> {onchainStatus?.enabled ? "Live on Sepolia" : "Simulated only"}
+                </p>
+                <p className="manifest-item">
+                  <span>Reputation:</span> {onchainStatus?.reputationEnabled ? "Enabled" : "Disabled"}
+                </p>
+                <p className="manifest-item">
+                  <span>Validation:</span>{" "}
+                  {onchainStatus?.validationEnabled
+                    ? "Enabled"
+                    : onchainStatus?.validationRequested
+                      ? "Requested but unavailable"
+                      : "Disabled"}
+                </p>
+                {!onchainStatus?.validationEnabled && onchainStatus?.validationReason ? (
+                  <p className="manifest-item">
+                    <span>Validation Note:</span> {onchainStatus.validationReason}
+                  </p>
+                ) : null}
+                <p className="manifest-item">
+                  <span>Chain:</span> {onchainStatus?.network ?? "ethereum-sepolia"} ({onchainStatus?.chainId ?? "11155111"})
+                </p>
+                <p className="manifest-item">
+                  <span>Feedback Wallet:</span> {onchainStatus?.feedbackWallet ?? "not configured"}
+                </p>
+                {!onchainStatus?.enabled && onchainStatus?.disabledReason ? (
+                  <p className="manifest-item">
+                    <span>Reason:</span> {onchainStatus.disabledReason}
+                  </p>
+                ) : null}
+                <p className="manifest-item">
+                  <span>Agent ID:</span> {onchainStatus?.identityAgentId ?? "pending"}
+                </p>
+              </section>
+
+              <section className="card manifest-card">
+                <h2>Plugin Dock</h2>
+                <div className="feed-list">
+                  {plugins.map((plugin) => (
+                    <p key={plugin.id} className={plugin.status === "rejected" ? "log-failure" : "log-onchain"}>
+                      [{plugin.status}] {plugin.label}: {plugin.summary}
                     </p>
-                    <p className="receipt-meta">{receipt.jobId ? jobsById.get(receipt.jobId)?.title ?? receipt.jobId : "system receipt"}</p>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
+                <p className="budget-line">POST {httpBase}/plugins to plug your agent into the city.</p>
+              </section>
 
-          <section className="card feed-card">
-            <h2>Decision Feed</h2>
-            <div className="feed-list">
-              {logs.map((log) => (
-                <p key={log.id} className={`log-${log.type}`}>
-                  [{log.type}] {log.actor}: {log.message}
-                </p>
-              ))}
-            </div>
-          </section>
+              <section className="card manifest-card">
+                <h2>Live Jobs</h2>
+                <div className="feed-list">
+                  {(snapshot?.jobs ?? []).map((job) => (
+                    <p key={job.id} className={job.status === "failed" ? "log-failure" : job.status === "completed" ? "log-onchain" : "log-decision"}>
+                      [{formatStatus(job.status)}] {job.title}
+                      <br />
+                      {JOB_ROUTING[job.category].label} | {job.submitter} | Trust {job.requiredTrust.toFixed(2)}
+                    </p>
+                  ))}
+                </div>
+              </section>
+
+              <section className="card receipt-card">
+                <h2>Onchain Receipts</h2>
+                <div className="receipt-list">
+                  {receipts.map((receipt) => (
+                    <div key={receipt.id} className="receipt-item">
+                      <p className={`receipt-mode receipt-mode-${receipt.mode}`}>{receipt.mode === "onchain" ? "live" : "sim"}</p>
+                      <div>
+                        <p className="receipt-action">{receipt.action.replace(/_/g, " ")}</p>
+                        <p className="receipt-hash">
+                          {receipt.explorerUrl ? (
+                            <a href={receipt.explorerUrl} target="_blank" rel="noreferrer">
+                              {shortHash(receipt.txHash)}
+                            </a>
+                          ) : (
+                            shortHash(receipt.txHash)
+                          )}
+                        </p>
+                        <p className="receipt-meta">{receipt.jobId ? jobsById.get(receipt.jobId)?.title ?? receipt.jobId : "system receipt"}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="card feed-card">
+                <h2>Decision Feed</h2>
+                <div className="feed-list">
+                  {logs.map((log) => (
+                    <p key={log.id} className={`log-${log.type}`}>
+                      [{log.type}] {log.actor}: {log.message}
+                    </p>
+                  ))}
+                </div>
+              </section>
+            </>
+          ) : null}
         </aside>
       </main>
     </div>

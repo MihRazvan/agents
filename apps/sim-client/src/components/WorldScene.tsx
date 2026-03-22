@@ -12,9 +12,12 @@ import AnimatedAgentAvatar from "./AnimatedAgentAvatar";
 interface Props {
   snapshot: WorldSnapshot | null;
   selectedAgentId?: string | null;
+  followAgentId?: string | null;
+  focusNonce?: number;
 }
 
 const USER_CONTROL_PAUSE_MS = 9000;
+const ACTIVE_CHAT_MS = 9000;
 
 function toPathPoint(position: Vec2): [number, number, number] {
   return [position.x, 0.35, position.y];
@@ -70,6 +73,23 @@ function getFocusPoint(snapshot: WorldSnapshot | null, selectedAgentId?: string 
   };
 }
 
+function agentLookVector(agent: WorldSnapshot["agents"][number]): THREE.Vector3 {
+  const nextWaypoint = agent.path[0] ?? agent.target;
+  const dx = nextWaypoint.x - agent.position.x;
+  const dz = nextWaypoint.y - agent.position.y;
+  const length = Math.hypot(dx, dz);
+  if (length < 0.001) {
+    return new THREE.Vector3(0.6, 0, 1).normalize();
+  }
+  return new THREE.Vector3(dx / length, 0, dz / length);
+}
+
+function getFollowCameraPosition(agent: WorldSnapshot["agents"][number]): THREE.Vector3 {
+  const forward = agentLookVector(agent);
+  const behind = forward.clone().multiplyScalar(-7.2);
+  return new THREE.Vector3(agent.position.x + behind.x, 4.8, agent.position.y + behind.z);
+}
+
 function CameraDirector({
   snapshot,
   selectedAgentId,
@@ -93,9 +113,21 @@ function CameraDirector({
       return;
     }
 
+    if (selectedAgentId) {
+      const agent = snapshot.agents.find((candidate) => candidate.id === selectedAgentId);
+      if (agent) {
+        const followTarget = new THREE.Vector3(agent.position.x, 1.9, agent.position.y);
+        const followCamera = getFollowCameraPosition(agent);
+        targetRef.current.lerp(followTarget, Math.min(1, delta * 4.2));
+        controls.target.copy(targetRef.current);
+        controls.object.position.lerp(followCamera, Math.min(1, delta * 3.2));
+        controls.update();
+        return;
+      }
+    }
+
     const focus = getFocusPoint(snapshot, selectedAgentId);
     targetRef.current.set(focus.x, 1.35, focus.y);
-
     controls.target.lerp(targetRef.current, Math.min(1, delta * 1.85));
     controls.update();
   });
@@ -220,7 +252,8 @@ function StreamAnchorController({
 
 function latestChatsByActor(chats: ChatMessage[]): Map<string, ChatMessage> {
   const map = new Map<string, ChatMessage>();
-  for (const chat of chats) {
+  for (let index = chats.length - 1; index >= 0; index -= 1) {
+    const chat = chats[index];
     if (!map.has(chat.actorId)) {
       map.set(chat.actorId, chat);
     }
@@ -228,11 +261,17 @@ function latestChatsByActor(chats: ChatMessage[]): Map<string, ChatMessage> {
   return map;
 }
 
-export default function WorldScene({ snapshot, selectedAgentId }: Props) {
-  const focusPoint = useMemo(() => getFocusPoint(snapshot, selectedAgentId), [snapshot, selectedAgentId]);
+function recentVisibleChats(chats: ChatMessage[]): ChatMessage[] {
+  const cutoff = Date.now() - ACTIVE_CHAT_MS;
+  return chats.filter((chat) => new Date(chat.timestamp).getTime() >= cutoff);
+}
+
+export default function WorldScene({ snapshot, selectedAgentId, followAgentId, focusNonce = 0 }: Props) {
+  const focusPoint = useMemo(() => getFocusPoint(snapshot, followAgentId), [snapshot, followAgentId]);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const autoPausedUntilRef = useRef(0);
   const userControllingRef = useRef(false);
+  const lastFocusNonceRef = useRef(0);
   const [streamAnchor, setStreamAnchor] = useState<Vec2>(focusPoint);
 
   useEffect(() => {
@@ -273,7 +312,28 @@ export default function WorldScene({ snapshot, selectedAgentId }: Props) {
     return map;
   }, [snapshot?.jobs]);
 
-  const chatsByActor = useMemo(() => latestChatsByActor(snapshot?.chats ?? []), [snapshot?.chats]);
+  const liveChats = useMemo(() => recentVisibleChats(snapshot?.chats ?? []), [snapshot?.chats]);
+  const chatsByActor = useMemo(() => latestChatsByActor(liveChats), [liveChats]);
+  const selectedAgent = useMemo(() => snapshot?.agents.find((agent) => agent.id === selectedAgentId), [snapshot?.agents, selectedAgentId]);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls || !snapshot || !selectedAgentId || focusNonce === 0 || focusNonce === lastFocusNonceRef.current) {
+      return;
+    }
+
+    const agent = snapshot.agents.find((candidate) => candidate.id === selectedAgentId);
+    if (!agent) {
+      return;
+    }
+
+    autoPausedUntilRef.current = 0;
+    lastFocusNonceRef.current = focusNonce;
+    const followCamera = getFollowCameraPosition(agent);
+    controls.target.set(agent.position.x, 1.9, agent.position.y);
+    controls.object.position.copy(followCamera);
+    controls.update();
+  }, [snapshot, selectedAgentId, focusNonce]);
 
   return (
     <Canvas
@@ -307,7 +367,7 @@ export default function WorldScene({ snapshot, selectedAgentId }: Props) {
       <DynamicRoads roads={streamedCity.roads} />
       <TrafficLanes center={streamAnchor} />
 
-      {snapshot ? <DistrictOverlay snapshot={snapshot} /> : null}
+      {snapshot ? <DistrictOverlay snapshot={snapshot} selectedAgentId={selectedAgentId} /> : null}
       <RoleHubLandmarks />
       {snapshot ? <PluginRegistryBoard plugins={snapshot.pluginAgents} /> : null}
 
@@ -331,9 +391,45 @@ export default function WorldScene({ snapshot, selectedAgentId }: Props) {
             agent={agent}
             job={agent.assignedJobId ? jobsById.get(agent.assignedJobId) : undefined}
             chat={chatsByActor.get(agent.id)}
+            selected={selectedAgentId === agent.id}
           />
         ))}
       </Suspense>
+
+      {liveChats.map((chat) => {
+        if (!chat.recipientId) {
+          return null;
+        }
+        const from = snapshot?.agents.find((agent) => agent.id === chat.actorId);
+        const to = snapshot?.agents.find((agent) => agent.id === chat.recipientId);
+        if (!from || !to) {
+          return null;
+        }
+
+        return (
+          <Line
+            key={chat.id}
+            points={[
+              [from.position.x, 1.8, from.position.y],
+              [to.position.x, 1.8, to.position.y]
+            ]}
+            color={chat.tone === "warning" ? "#ff8a8a" : "#8de8ff"}
+            dashed
+            dashScale={2}
+            dashSize={0.3}
+            gapSize={0.18}
+            transparent
+            opacity={0.75}
+            lineWidth={1.6}
+          />
+        );
+      })}
+
+      {selectedAgent ? (
+        <Text position={[selectedAgent.position.x, 5.4, selectedAgent.position.y]} fontSize={0.28} color="#f4fbff" anchorX="center" anchorY="middle">
+          {selectedAgent.name}
+        </Text>
+      ) : null}
 
       {Object.entries(trailMap).map(([agentId, points]) => {
         if (points.length < 2) {
@@ -362,7 +458,7 @@ export default function WorldScene({ snapshot, selectedAgentId }: Props) {
         </group>
       ))}
 
-      <CameraDirector snapshot={snapshot} selectedAgentId={selectedAgentId} controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
+      <CameraDirector snapshot={snapshot} selectedAgentId={followAgentId} controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
       <FreeRoamController controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
       <StreamAnchorController controlsRef={controlsRef} onAnchorChunkChange={setStreamAnchor} />
       <OrbitControls

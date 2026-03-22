@@ -117,30 +117,30 @@ body,
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(340px, 0.8fr);
+  grid-template-columns: minmax(0, 2.45fr) minmax(300px, 0.55fr);
   gap: 0.8rem;
   min-height: 0;
 }
 
 .scene-column {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 0.8rem;
+  display: block;
   min-height: 0;
 }
 
 .scene-panel {
+  position: relative;
   border-radius: 16px;
   overflow: hidden;
   border: 1px solid var(--panel-border);
   background: rgba(8, 14, 26, 0.7);
   box-shadow: inset 0 0 0 1px rgba(116, 205, 255, 0.08), 0 16px 34px rgba(0, 0, 0, 0.4);
+  min-height: calc(100vh - 132px);
 }
 
 .side-panel {
   display: grid;
   gap: 0.7rem;
-  grid-template-rows: auto auto auto auto auto auto minmax(140px, 1fr);
+  align-content: start;
   min-height: 0;
 }
 
@@ -220,7 +220,7 @@ body,
 .feed-list {
   display: grid;
   gap: 0.38rem;
-  max-height: 200px;
+  max-height: 320px;
   overflow: auto;
   padding-right: 0.1rem;
 }
@@ -259,12 +259,13 @@ button.roster-item {
 
 .agent-name {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 0.92rem;
+  font-weight: 600;
 }
 
 .agent-phase {
   margin: 0.14rem 0 0;
-  font-size: 0.7rem;
+  font-size: 0.74rem;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -281,7 +282,7 @@ button.roster-item {
 .agent-meta {
   text-align: right;
   font-family: "IBM Plex Mono", monospace;
-  font-size: 0.69rem;
+  font-size: 0.74rem;
   color: #b8cae6;
 }
 
@@ -398,92 +399,152 @@ button.roster-item {
   background: rgba(12, 48, 36, 0.6);
 }
 
-.chat-panel {
-  min-height: 180px;
-}
-
-.chat-list {
+.scene-chat-overlay {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  width: min(320px, 34%);
+  max-height: min(42vh, 420px);
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 0.45rem;
-  max-height: 220px;
-  overflow: auto;
-  padding-right: 0.1rem;
+  padding: 0.6rem;
+  border-radius: 14px;
+  border: 1px solid rgba(126, 214, 255, 0.22);
+  background: rgba(5, 12, 24, 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.28);
 }
 
-.chat-item {
-  border-radius: 10px;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid rgba(120, 177, 236, 0.2);
-  background: rgba(15, 30, 49, 0.72);
+.scene-chat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
 }
 
-.chat-item-decision {
-  border-color: rgba(102, 241, 193, 0.24);
-  background: rgba(12, 48, 36, 0.48);
-}
-
-.chat-item-warning {
-  border-color: rgba(255, 128, 128, 0.35);
-  background: rgba(56, 19, 30, 0.58);
-}
-
-.chat-actor {
+.scene-chat-head h2 {
   margin: 0;
-  font-size: 0.72rem;
-  color: #dff4ff;
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d6ebff;
+}
+
+.scene-chat-head p {
+  margin: 0;
+  font-size: 0.64rem;
+  color: var(--muted);
   font-family: "IBM Plex Mono", monospace;
 }
 
-.chat-message {
-  margin: 0.24rem 0 0;
-  font-size: 0.84rem;
-  color: #eef5ff;
-  line-height: 1.4;
+.scene-chat-list {
+  display: grid;
+  gap: 0.36rem;
+  overflow: auto;
 }
 
-.chat-empty {
+.scene-chat-item {
+  border-radius: 9px;
+  padding: 0.42rem 0.48rem;
+  border: 1px solid rgba(120, 177, 236, 0.15);
+  background: rgba(12, 24, 42, 0.78);
+}
+
+.scene-chat-item-decision {
+  border-color: rgba(102, 241, 193, 0.22);
+  background: rgba(10, 43, 36, 0.72);
+}
+
+.scene-chat-item-warning {
+  border-color: rgba(255, 128, 128, 0.28);
+  background: rgba(49, 18, 29, 0.76);
+}
+
+.scene-chat-actor {
   margin: 0;
-  color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.66rem;
+  color: #ecf7ff;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.scene-chat-message {
+  display: block;
+  margin-top: 0.18rem;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: #deebff;
+}
+
+.advanced-toggle {
+  appearance: none;
+  border: 1px solid rgba(132, 214, 255, 0.3);
+  border-radius: 12px;
+  background: rgba(10, 22, 40, 0.82);
+  color: #dcf4ff;
+  padding: 0.75rem 0.9rem;
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+
+.advanced-toggle:hover {
+  background: rgba(15, 31, 55, 0.9);
+  border-color: rgba(132, 214, 255, 0.5);
+  transform: translateY(-1px);
 }
 
 .world-tag {
-  min-width: 220px;
-  max-width: 320px;
-  border: 1px solid rgba(132, 214, 255, 0.45);
+  min-width: 138px;
+  max-width: 230px;
+  border: 1px solid rgba(132, 214, 255, 0.32);
   border-radius: 8px;
-  background: rgba(8, 20, 36, 0.84);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.32);
+  background: rgba(8, 20, 36, 0.72);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
   backdrop-filter: blur(4px);
   color: #dff1ff;
   font-family: "IBM Plex Mono", monospace;
-  padding: 0.32rem 0.44rem;
+  padding: 0.24rem 0.36rem;
   line-height: 1.25;
   pointer-events: none;
 }
 
 .world-tag p {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 0.68rem;
 }
 
 .world-tag span {
   display: block;
-  margin-top: 0.18rem;
-  font-size: 0.74rem;
+  margin-top: 0.12rem;
+  font-size: 0.62rem;
   color: #a8c6e6;
 }
 
 .world-tag-hub {
-  border-color: rgba(160, 224, 255, 0.54);
+  min-width: unset;
+  max-width: 180px;
+  border-color: rgba(160, 224, 255, 0.34);
 }
 
 .world-tag-district {
-  border-color: rgba(138, 232, 186, 0.52);
+  min-width: 150px;
+  border-color: rgba(138, 232, 186, 0.28);
+  background: rgba(9, 22, 27, 0.58);
+}
+
+.world-tag-district-active {
+  border-color: rgba(138, 232, 186, 0.55);
+  background: rgba(10, 31, 28, 0.82);
 }
 
 .world-tag-job {
-  border-color: rgba(255, 196, 117, 0.62);
+  min-width: 180px;
+  max-width: 260px;
+  border-color: rgba(255, 196, 117, 0.42);
+  background: rgba(28, 18, 9, 0.8);
 }
 
 .world-tag-plugin {
@@ -491,8 +552,10 @@ button.roster-item {
 }
 
 .world-tag-chat {
-  min-width: 200px;
-  max-width: 300px;
+  min-width: 240px;
+  max-width: 360px;
+  border-width: 1px;
+  background: rgba(7, 18, 31, 0.96);
 }
 
 .world-tag-chat-decision {
@@ -511,21 +574,24 @@ button.roster-item {
 @media (max-width: 1200px) {
   .layout {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
   }
 
-  .side-panel {
-    grid-template-rows: repeat(7, auto);
+  .scene-panel {
+    min-height: 68vh;
   }
 
-  .scene-column {
-    grid-template-rows: 60vh auto;
+  .scene-chat-overlay {
+    width: calc(100% - 1.2rem);
+    max-height: 34vh;
+    right: 0.6rem;
+    left: 0.6rem;
+    top: 0.6rem;
   }
 
   .roster-list,
   .receipt-list,
   .feed-list,
-  .chat-list {
+  .scene-chat-list {
     max-height: 160px;
   }
 }
