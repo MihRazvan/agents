@@ -5,3 +5,4 @@ dist
 agent_log.json
 onchain_state.json
 *.tsbuildinfo
+artifacts

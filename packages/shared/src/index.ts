@@ -74,6 +74,7 @@ export interface Job {
   blockedReason?: string;
   selectedAgentId?: string;
   selectedAgentName?: string;
+  artifactPath?: string;
   outputSummary?: string;
 }
 
