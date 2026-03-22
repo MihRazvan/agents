@@ -18,11 +18,15 @@ interface Props {
 
 const USER_CONTROL_PAUSE_MS = 9000;
 const ACTIVE_CHAT_MS = 9000;
-const FOLLOW_CAMERA_DISTANCE = 12;
-const FOLLOW_CAMERA_HEIGHT = 6.5;
-const FOLLOW_CAMERA_SHOULDER = 2.4;
-const FOLLOW_LOOK_AHEAD = 5.5;
-const FOLLOW_LOOK_HEIGHT = 2.6;
+const FOLLOW_CAMERA_DISTANCE = 13.5;
+const FOLLOW_CAMERA_HEIGHT = 7.2;
+const FOLLOW_CAMERA_SHOULDER = 3.4;
+const FOLLOW_LOOK_AHEAD = 6.2;
+const FOLLOW_LOOK_HEIGHT = 2.9;
+const FOLLOW_TARGET_LAG = 5.4;
+const FOLLOW_CAMERA_LAG = 2.2;
+const FOLLOW_COLLISION_BUFFER = 2.2;
+const FOLLOW_MIN_DISTANCE = 5.8;
 
 function toPathPoint(position: Vec2): [number, number, number] {
   return [position.x, 0.35, position.y];
@@ -89,12 +93,19 @@ function agentLookVector(agent: WorldSnapshot["agents"][number]): THREE.Vector3 
   return new THREE.Vector3(dx / length, 0, dz / length);
 }
 
-function getFollowCameraPosition(agent: WorldSnapshot["agents"][number]): THREE.Vector3 {
+function getFollowCameraPosition(
+  agent: WorldSnapshot["agents"][number],
+  options?: {
+    distance?: number;
+    height?: number;
+    shoulder?: number;
+  }
+): THREE.Vector3 {
   const forward = agentLookVector(agent);
   const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-  const behind = forward.clone().multiplyScalar(-FOLLOW_CAMERA_DISTANCE);
-  const shoulder = right.multiplyScalar(FOLLOW_CAMERA_SHOULDER);
-  return new THREE.Vector3(agent.position.x + behind.x + shoulder.x, FOLLOW_CAMERA_HEIGHT, agent.position.y + behind.z + shoulder.z);
+  const behind = forward.clone().multiplyScalar(-(options?.distance ?? FOLLOW_CAMERA_DISTANCE));
+  const shoulder = right.multiplyScalar(options?.shoulder ?? FOLLOW_CAMERA_SHOULDER);
+  return new THREE.Vector3(agent.position.x + behind.x + shoulder.x, options?.height ?? FOLLOW_CAMERA_HEIGHT, agent.position.y + behind.z + shoulder.z);
 }
 
 function getFollowTargetPosition(agent: WorldSnapshot["agents"][number]): THREE.Vector3 {
@@ -146,10 +157,41 @@ function resolveCameraObstruction(
     return desiredCamera;
   }
 
-  const safeDistance = Math.max(4.8, nearestHit - 1.8);
+  const safeDistance = Math.max(FOLLOW_MIN_DISTANCE, nearestHit - FOLLOW_COLLISION_BUFFER);
   const adjusted = lookTarget.clone().add(direction.normalize().multiplyScalar(safeDistance));
-  adjusted.y = Math.max(adjusted.y, FOLLOW_CAMERA_HEIGHT * 0.72);
+  adjusted.y = Math.max(adjusted.y, FOLLOW_CAMERA_HEIGHT * 0.8);
   return adjusted;
+}
+
+function chooseBestFollowCamera(
+  agent: WorldSnapshot["agents"][number],
+  lookTarget: THREE.Vector3,
+  structures: CityStructure[]
+): THREE.Vector3 {
+  const candidates = [
+    getFollowCameraPosition(agent),
+    getFollowCameraPosition(agent, { shoulder: -FOLLOW_CAMERA_SHOULDER }),
+    getFollowCameraPosition(agent, { distance: FOLLOW_CAMERA_DISTANCE - 2.5, shoulder: FOLLOW_CAMERA_SHOULDER * 0.65 }),
+    getFollowCameraPosition(agent, { distance: FOLLOW_CAMERA_DISTANCE - 2.5, shoulder: -FOLLOW_CAMERA_SHOULDER * 0.65 }),
+    getFollowCameraPosition(agent, { height: FOLLOW_CAMERA_HEIGHT + 2.1, distance: FOLLOW_CAMERA_DISTANCE - 1.2, shoulder: FOLLOW_CAMERA_SHOULDER * 0.4 })
+  ];
+
+  let best = candidates[0];
+  let bestPenalty = Number.POSITIVE_INFINITY;
+
+  for (const candidate of candidates) {
+    const resolved = resolveCameraObstruction(candidate, lookTarget, structures);
+    const displacement = candidate.distanceToSquared(resolved);
+    const distancePenalty = Math.abs(candidate.distanceTo(lookTarget) - FOLLOW_CAMERA_DISTANCE) * 0.35;
+    const heightPenalty = Math.abs(candidate.y - FOLLOW_CAMERA_HEIGHT) * 0.18;
+    const penalty = displacement + distancePenalty + heightPenalty;
+    if (penalty < bestPenalty) {
+      bestPenalty = penalty;
+      best = resolved;
+    }
+  }
+
+  return best;
 }
 
 function CameraDirector({
@@ -182,9 +224,9 @@ function CameraDirector({
       const agent = snapshot.agents.find((candidate) => candidate.id === selectedAgentId);
       if (agent) {
         const desiredTarget = getFollowTargetPosition(agent);
-        const desiredCamera = resolveCameraObstruction(getFollowCameraPosition(agent), desiredTarget, streamedStructures);
-        targetRef.current.lerp(desiredTarget, Math.min(1, delta * 4.6));
-        cameraRef.current.lerp(desiredCamera, Math.min(1, delta * 2.8));
+        const desiredCamera = chooseBestFollowCamera(agent, desiredTarget, streamedStructures);
+        targetRef.current.lerp(desiredTarget, Math.min(1, delta * FOLLOW_TARGET_LAG));
+        cameraRef.current.lerp(desiredCamera, Math.min(1, delta * FOLLOW_CAMERA_LAG));
         controls.target.copy(targetRef.current);
         controls.object.position.copy(cameraRef.current);
         controls.update();
@@ -397,7 +439,7 @@ export default function WorldScene({ snapshot, selectedAgentId, followAgentId, f
     autoPausedUntilRef.current = 0;
     lastFocusNonceRef.current = focusNonce;
     const followTarget = getFollowTargetPosition(agent);
-    const followCamera = resolveCameraObstruction(getFollowCameraPosition(agent), followTarget, colliders);
+    const followCamera = chooseBestFollowCamera(agent, followTarget, colliders);
     controls.target.copy(followTarget);
     controls.object.position.copy(followCamera);
     controls.update();

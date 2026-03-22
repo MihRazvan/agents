@@ -56,29 +56,7 @@ function simplifyPath(points: Vec2[]): Vec2[] {
     }
   }
   compressed.push(points[points.length - 1]);
-
-  const rounded: Vec2[] = [compressed[0]];
-  const cornerInset = 0.33;
-
-  for (let i = 1; i < compressed.length - 1; i += 1) {
-    const prev = compressed[i - 1];
-    const pivot = compressed[i];
-    const next = compressed[i + 1];
-    const inDir = direction(pivot, prev);
-    const outDir = direction(pivot, next);
-
-    rounded.push({
-      x: pivot.x + inDir.x * cornerInset,
-      y: pivot.y + inDir.y * cornerInset
-    });
-    rounded.push({
-      x: pivot.x + outDir.x * cornerInset,
-      y: pivot.y + outDir.y * cornerInset
-    });
-  }
-
-  rounded.push(compressed[compressed.length - 1]);
-  return rounded;
+  return compressed;
 }
 
 export function createNavigation(config: NavigationConfig): NavigationApi {
@@ -92,6 +70,10 @@ export function createNavigation(config: NavigationConfig): NavigationApi {
   function distanceToGridLine(value: number, spacing: number): number {
     const mod = ((value % spacing) + spacing) % spacing;
     return Math.min(mod, spacing - mod);
+  }
+
+  function nearestGridLine(value: number, spacing: number): number {
+    return Math.round(value / spacing) * spacing;
   }
 
   function isRoadCell(cell: GridPoint): boolean {
@@ -128,11 +110,7 @@ export function createNavigation(config: NavigationConfig): NavigationApi {
       { x: cell.x + config.gridStep, y: cell.y },
       { x: cell.x - config.gridStep, y: cell.y },
       { x: cell.x, y: cell.y + config.gridStep },
-      { x: cell.x, y: cell.y - config.gridStep },
-      { x: cell.x + config.gridStep, y: cell.y + config.gridStep },
-      { x: cell.x + config.gridStep, y: cell.y - config.gridStep },
-      { x: cell.x - config.gridStep, y: cell.y + config.gridStep },
-      { x: cell.x - config.gridStep, y: cell.y - config.gridStep }
+      { x: cell.x, y: cell.y - config.gridStep }
     ];
   }
 
@@ -140,10 +118,26 @@ export function createNavigation(config: NavigationConfig): NavigationApi {
     return { x: cell.x, y: cell.y };
   }
 
+  function snapToRoadCenter(cell: GridPoint): GridPoint {
+    const snapped = { ...cell };
+    const nearestMinorX = nearestGridLine(cell.x, config.roadMinorSpacing);
+    const nearestMinorY = nearestGridLine(cell.y, config.roadMinorSpacing);
+
+    if (Math.abs(cell.x - nearestMinorX) <= config.roadMinorHalfWidth) {
+      snapped.x = nearestMinorX;
+    }
+
+    if (Math.abs(cell.y - nearestMinorY) <= config.roadMinorHalfWidth) {
+      snapped.y = nearestMinorY;
+    }
+
+    return snapped;
+  }
+
   function ensureWalkable(point: Vec2): Vec2 {
     const start = clampToGrid(point);
     if (!isBlockedCell(start)) {
-      return cellToVec2(start);
+      return cellToVec2(snapToRoadCenter(start));
     }
 
     for (let radius = 1; radius <= 6; radius += 1) {
@@ -151,7 +145,7 @@ export function createNavigation(config: NavigationConfig): NavigationApi {
         for (let dy = -radius; dy <= radius; dy += 1) {
           const candidate: GridPoint = { x: start.x + dx, y: start.y + dy };
           if (!isBlockedCell(candidate)) {
-            return cellToVec2(candidate);
+            return cellToVec2(snapToRoadCenter(candidate));
           }
         }
       }
@@ -174,8 +168,8 @@ export function createNavigation(config: NavigationConfig): NavigationApi {
   }
 
   function planPath(start: Vec2, goal: Vec2): Vec2[] {
-    const origin = clampToGrid(ensureWalkable(start));
-    const target = clampToGrid(ensureWalkable(goal));
+    const origin = snapToRoadCenter(clampToGrid(ensureWalkable(start)));
+    const target = snapToRoadCenter(clampToGrid(ensureWalkable(goal)));
 
     if (origin.x === target.x && origin.y === target.y) {
       return [goal];
@@ -208,9 +202,7 @@ export function createNavigation(config: NavigationConfig): NavigationApi {
           continue;
         }
 
-        const diagonal = neighbor.x !== current.x && neighbor.y !== current.y;
-        const edgeCost = diagonal ? Math.SQRT2 : 1;
-        const tentative = (gScore.get(currentKey) ?? Number.POSITIVE_INFINITY) + movementCost(neighbor) * edgeCost;
+        const tentative = (gScore.get(currentKey) ?? Number.POSITIVE_INFINITY) + movementCost(neighbor);
         if (tentative >= (gScore.get(neighborKey) ?? Number.POSITIVE_INFINITY)) {
           continue;
         }

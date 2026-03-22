@@ -134,7 +134,16 @@ body,
   border: 1px solid var(--panel-border);
   background: rgba(8, 14, 26, 0.7);
   box-shadow: inset 0 0 0 1px rgba(116, 205, 255, 0.08), 0 16px 34px rgba(0, 0, 0, 0.4);
-  min-height: calc(100vh - 132px);
+  height: calc(100vh - 132px);
+  min-height: 640px;
+}
+
+.scene-canvas-shell,
+.scene-canvas-shell > div,
+.scene-canvas-shell canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .side-panel {
@@ -401,19 +410,20 @@ button.roster-item {
 
 .scene-chat-overlay {
   position: absolute;
-  top: 0.9rem;
-  right: 0.9rem;
-  width: min(320px, 34%);
-  max-height: min(42vh, 420px);
+  top: 0.75rem;
+  right: 0.75rem;
+  width: min(280px, 28%);
+  max-height: min(34vh, 300px);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 0.45rem;
-  padding: 0.6rem;
-  border-radius: 14px;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border-radius: 12px;
   border: 1px solid rgba(126, 214, 255, 0.22);
-  background: rgba(5, 12, 24, 0.72);
+  background: rgba(5, 12, 24, 0.66);
   backdrop-filter: blur(12px);
   box-shadow: 0 18px 34px rgba(0, 0, 0, 0.28);
+  z-index: 4;
 }
 
 .scene-chat-head {
@@ -425,7 +435,7 @@ button.roster-item {
 
 .scene-chat-head h2 {
   margin: 0;
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #d6ebff;
@@ -433,7 +443,7 @@ button.roster-item {
 
 .scene-chat-head p {
   margin: 0;
-  font-size: 0.64rem;
+  font-size: 0.58rem;
   color: var(--muted);
   font-family: "IBM Plex Mono", monospace;
 }
@@ -446,7 +456,7 @@ button.roster-item {
 
 .scene-chat-item {
   border-radius: 9px;
-  padding: 0.42rem 0.48rem;
+  padding: 0.36rem 0.42rem;
   border: 1px solid rgba(120, 177, 236, 0.15);
   background: rgba(12, 24, 42, 0.78);
 }
@@ -463,15 +473,15 @@ button.roster-item {
 
 .scene-chat-actor {
   margin: 0;
-  font-size: 0.66rem;
+  font-size: 0.61rem;
   color: #ecf7ff;
   font-family: "IBM Plex Mono", monospace;
 }
 
 .scene-chat-message {
   display: block;
-  margin-top: 0.18rem;
-  font-size: 0.74rem;
+  margin-top: 0.14rem;
+  font-size: 0.68rem;
   line-height: 1.35;
   color: #deebff;
 }
@@ -577,15 +587,16 @@ button.roster-item {
   }
 
   .scene-panel {
-    min-height: 68vh;
+    height: 68vh;
+    min-height: 520px;
   }
 
   .scene-chat-overlay {
-    width: calc(100% - 1.2rem);
-    max-height: 34vh;
+    width: min(280px, calc(100% - 1.2rem));
+    max-height: min(32vh, 240px);
     right: 0.6rem;
-    left: 0.6rem;
     top: 0.6rem;
+    left: auto;
   }
 
   .roster-list,

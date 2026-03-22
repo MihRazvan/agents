@@ -34,10 +34,11 @@ export const ROAD_MINOR_SPACING = 12;
 
 const LOT_SIZE = 6;
 const ROAD_MAJOR_SPACING = 24;
-const ROAD_MAJOR_HALF_WIDTH = 1.6;
-const ROAD_MINOR_HALF_WIDTH = 0.8;
+const ROAD_MAJOR_HALF_WIDTH = 2.8;
+const ROAD_MINOR_HALF_WIDTH = 1.7;
 const NEAR_CHUNK_RADIUS = 2;
 const FAR_CHUNK_RADIUS = 4;
+const BUILDING_SETBACK = 0.95;
 
 function hashNumber(seed: number, x: number, y: number): number {
   let value = (seed ^ (x * 374761393) ^ (y * 668265263)) >>> 0;
@@ -51,11 +52,11 @@ function distanceToGridLine(value: number, spacing: number): number {
   return Math.min(mod, spacing - mod);
 }
 
-function roadTypeAt(value: number): "major" | "minor" | "none" {
-  if (distanceToGridLine(value, ROAD_MAJOR_SPACING) <= ROAD_MAJOR_HALF_WIDTH) {
+function roadTypeAt(value: number, extraClearance = 0): "major" | "minor" | "none" {
+  if (distanceToGridLine(value, ROAD_MAJOR_SPACING) <= ROAD_MAJOR_HALF_WIDTH + extraClearance) {
     return "major";
   }
-  if (distanceToGridLine(value, ROAD_MINOR_SPACING) <= ROAD_MINOR_HALF_WIDTH) {
+  if (distanceToGridLine(value, ROAD_MINOR_SPACING) <= ROAD_MINOR_HALF_WIDTH + extraClearance) {
     return "minor";
   }
   return "none";
@@ -174,7 +175,7 @@ function buildChunkStructures(seed: number, cx: number, cz: number, lod: "near" 
       const x = chunkMinX + lx * LOT_SIZE + LOT_SIZE / 2;
       const z = chunkMinZ + lz * LOT_SIZE + LOT_SIZE / 2;
 
-      if (roadTypeAt(x) !== "none" || roadTypeAt(z) !== "none") {
+      if (roadTypeAt(x, BUILDING_SETBACK) !== "none" || roadTypeAt(z, BUILDING_SETBACK) !== "none") {
         continue;
       }
 

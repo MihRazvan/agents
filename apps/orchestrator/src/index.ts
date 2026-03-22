@@ -50,8 +50,8 @@ const GRID_MAX = 164;
 const GRID_STEP = 1;
 const ROAD_MAJOR_SPACING = 24;
 const ROAD_MINOR_SPACING = 12;
-const ROAD_MAJOR_HALF_WIDTH = 2;
-const ROAD_MINOR_HALF_WIDTH = 1;
+const ROAD_MAJOR_HALF_WIDTH = 2.8;
+const ROAD_MINOR_HALF_WIDTH = 1.7;
 
 const manifest: AgentManifest = {
   agentName: "Trust City Exchange",
@@ -185,7 +185,7 @@ function createCoreAgent(config: {
   capabilities: AgentCapabilities;
   offset?: Vec2;
 }): AgentRuntimeState {
-  const home = hubPoint(config.role, config.offset);
+  const home = navigation.ensureWalkable(hubPoint(config.role, config.offset));
   return {
     id: config.id,
     name: config.name,
@@ -1110,6 +1110,7 @@ function registerPluginAgent(request: PluginRegistrationRequest): PluginAgentRec
 
   if (record.status === "active") {
     const activeCount = agents.filter((agent) => agent.kind === "plugin").length;
+    const spawnPoint = navigation.ensureWalkable(hubPoint("builder", { x: 14 + activeCount * 8, y: 8 - activeCount * 3 }));
     agents.push({
       id: record.id,
       name: record.label,
@@ -1117,8 +1118,8 @@ function registerPluginAgent(request: PluginRegistrationRequest): PluginAgentRec
       kind: "plugin",
       phase: "idle",
       trustScore: record.trustScore,
-      position: hubPoint("builder", { x: 14 + activeCount * 8, y: 8 - activeCount * 3 }),
-      target: hubPoint("builder", { x: 14 + activeCount * 8, y: 8 - activeCount * 3 }),
+      position: spawnPoint,
+      target: spawnPoint,
       path: [],
       energy: 1,
       speed: 0.96 + activeCount * 0.03,

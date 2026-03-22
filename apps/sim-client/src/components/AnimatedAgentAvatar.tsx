@@ -30,6 +30,7 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
   const rootRef = useRef<THREE.Group>(null);
   const auraRef = useRef<THREE.Mesh>(null);
   const clipRef = useRef<string>("Idle");
+  const headingRef = useRef(0);
   const currentPosRef = useRef(new THREE.Vector3(agent.position.x, 0.92, agent.position.y));
   const targetPosRef = useRef(new THREE.Vector3(agent.position.x, 0.92, agent.position.y));
   const previousPosRef = useRef(new THREE.Vector3(agent.position.x, 0.92, agent.position.y));
@@ -59,8 +60,13 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
   const color = AGENT_COLORS[agent.role];
 
   useEffect(() => {
-    targetPosRef.current.set(agent.position.x, 0.92, agent.position.y);
-  }, [agent.position.x, agent.position.y]);
+    const nextWaypoint = agent.path[0] ?? agent.target;
+    const dx = nextWaypoint.x - agent.position.x;
+    const dz = nextWaypoint.y - agent.position.y;
+    const length = Math.hypot(dx, dz) || 1;
+    const lead = agent.phase === "idle" ? 0 : Math.min(0.45, length * 0.18);
+    targetPosRef.current.set(agent.position.x + (dx / length) * lead, 0.92, agent.position.y + (dz / length) * lead);
+  }, [agent.position.x, agent.position.y, agent.target.x, agent.target.y, agent.phase, agent.path]);
 
   useEffect(() => {
     const desired = PHASE_TO_CLIP[agent.phase] ?? "Idle";
@@ -93,22 +99,29 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
       return;
     }
 
-    const blend = 1 - Math.exp(-delta * 8.5);
+    const blend = 1 - Math.exp(-delta * 6.2);
     currentPosRef.current.lerp(targetPosRef.current, blend);
     rootRef.current.position.x = currentPosRef.current.x;
     rootRef.current.position.z = currentPosRef.current.z;
 
-    const frameDistance = currentPosRef.current.distanceTo(previousPosRef.current);
+    const moveDx = currentPosRef.current.x - previousPosRef.current.x;
+    const moveDz = currentPosRef.current.z - previousPosRef.current.z;
+    const frameDistance = Math.sqrt(moveDx * moveDx + moveDz * moveDz);
     speedRef.current = THREE.MathUtils.damp(speedRef.current, frameDistance / Math.max(delta, 1e-4), 9, delta);
-    previousPosRef.current.copy(currentPosRef.current);
 
-    const lookAhead =
-      agent.path.length > 0
-        ? agent.path[0]
-        : { x: targetPosRef.current.x, y: targetPosRef.current.z };
-    const targetYaw = Math.atan2(lookAhead.x - currentPosRef.current.x, lookAhead.y - currentPosRef.current.z);
-    rootRef.current.rotation.y = THREE.MathUtils.damp(rootRef.current.rotation.y, targetYaw + Math.PI, 7.5, delta);
+    if (frameDistance > 0.0008) {
+      headingRef.current = Math.atan2(moveDx, moveDz);
+    } else {
+      const lookDx = targetPosRef.current.x - currentPosRef.current.x;
+      const lookDz = targetPosRef.current.z - currentPosRef.current.z;
+      if (Math.hypot(lookDx, lookDz) > 0.0008) {
+        headingRef.current = Math.atan2(lookDx, lookDz);
+      }
+    }
+
+    rootRef.current.rotation.y = THREE.MathUtils.damp(rootRef.current.rotation.y, headingRef.current + Math.PI, 7.5, delta);
     rootRef.current.position.y = 0.92 + Math.sin(clock.getElapsedTime() * 4.8 + currentPosRef.current.x) * 0.03;
+    previousPosRef.current.copy(currentPosRef.current);
 
     const active = actions[clipRef.current] ?? actions.Idle;
     if (active) {
