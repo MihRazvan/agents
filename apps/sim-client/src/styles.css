@@ -212,6 +212,97 @@ body,
   font-family: "IBM Plex Mono", monospace;
 }
 
+.job-form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.job-form-field {
+  display: grid;
+  gap: 0.24rem;
+}
+
+.job-form-field span {
+  color: #a9bfda;
+  font-size: 0.67rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.job-form-field input,
+.job-form-field textarea,
+.job-form-field select {
+  width: 100%;
+  border: 1px solid rgba(132, 214, 255, 0.22);
+  border-radius: 9px;
+  background: rgba(10, 22, 40, 0.84);
+  color: #e8f2ff;
+  padding: 0.55rem 0.65rem;
+  font: inherit;
+  resize: vertical;
+}
+
+.job-form-field input:focus,
+.job-form-field textarea:focus,
+.job-form-field select:focus {
+  outline: none;
+  border-color: rgba(126, 255, 193, 0.52);
+  box-shadow: 0 0 0 1px rgba(126, 255, 193, 0.18);
+}
+
+.job-form-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.job-form-hint {
+  margin: -0.05rem 0 0;
+  color: #a9bfda;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.job-submit-button {
+  appearance: none;
+  border: 1px solid rgba(126, 255, 193, 0.38);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(13, 58, 51, 0.96), rgba(15, 78, 64, 0.92));
+  color: #e8fff7;
+  padding: 0.65rem 0.85rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, filter 0.16s ease;
+}
+
+.job-submit-button:hover:enabled {
+  transform: translateY(-1px);
+  border-color: rgba(126, 255, 193, 0.56);
+  filter: brightness(1.04);
+}
+
+.job-submit-button:disabled {
+  opacity: 0.72;
+  cursor: progress;
+}
+
+.job-form-status {
+  margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.job-form-status-success {
+  color: #bdfbe5;
+}
+
+.job-form-status-error {
+  color: #ffd0c5;
+}
+
 .manifest-item {
   margin: 0.25rem 0;
   font-size: 0.78rem;

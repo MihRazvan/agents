@@ -60,6 +60,8 @@ export interface Job {
   position: Vec2;
   source: "operator" | "github" | "api" | "agent";
   submitter: string;
+  referenceUrl?: string;
+  deliveryTarget?: string;
   requestedSkills: string[];
   requiredTools: string[];
   requiredTrust: number;

@@ -11,6 +11,7 @@ import {
   type WorldSnapshot,
   type WsMessage
 } from "@trust-city/shared";
+import SubmitJobCard from "./components/SubmitJobCard";
 import WorldScene from "./components/WorldScene";
 
 const httpBase = import.meta.env.VITE_ORCHESTRATOR_HTTP ?? "http://localhost:8787";
@@ -266,6 +267,8 @@ export default function App() {
             </div>
           </section>
 
+          <SubmitJobCard httpBase={httpBase} />
+
           <button type="button" className="advanced-toggle" onClick={() => setAdvancedOpen((current) => !current)}>
             {advancedOpen ? "Hide Advanced" : "Show Advanced"}
           </button>
@@ -355,6 +358,8 @@ export default function App() {
                       </p>
                       <p className="job-detail-copy">{job.routingReason}</p>
                       <p className="job-detail-copy">{job.guardrailSummary}</p>
+                      {job.referenceUrl ? <p className="job-detail-copy">Reference: {job.referenceUrl}</p> : null}
+                      {job.deliveryTarget ? <p className="job-detail-copy">Destination: {job.deliveryTarget}</p> : null}
                       {job.blockedReason ? <p className="job-detail-copy job-detail-warning">Blocked: {job.blockedReason}</p> : null}
                       {job.outputSummary ? <p className="job-detail-copy">Output: {job.outputSummary}</p> : null}
                       {job.artifactPath ? <p className="job-detail-copy">Artifacts: {job.artifactPath}</p> : null}

@@ -101,6 +101,8 @@ interface JobTemplate {
   priority: Job["priority"];
   source: Job["source"];
   submitter: string;
+  referenceUrl?: string;
+  deliveryTarget?: string;
   requestedSkills: string[];
   requiredTools: string[];
   requiredTrust: number;
@@ -120,9 +122,10 @@ interface JobSubmissionRequest {
   title?: string;
   summary?: string;
   category?: JobCategory;
-  priority?: Job["priority"];
   source?: Job["source"];
   submitter?: string;
+  referenceUrl?: string;
+  deliveryTarget?: string;
   requestedSkills?: string[];
   requiredTools?: string[];
   requiredTrust?: number;
@@ -622,9 +625,11 @@ function normalizeJobSubmission(body: JobSubmissionRequest): JobTemplate | null 
     title: body.title.trim(),
     summary: body.summary.trim(),
     category: body.category,
-    priority: body.priority ?? fallback.priority,
+    priority: fallback.priority,
     source: body.source ?? "operator",
     submitter: body.submitter?.trim() || "Operator Console",
+    referenceUrl: body.referenceUrl?.trim() || undefined,
+    deliveryTarget: body.deliveryTarget?.trim() || undefined,
     requestedSkills: body.requestedSkills?.filter(Boolean) ?? fallback.requestedSkills,
     requiredTools: body.requiredTools?.filter(Boolean) ?? fallback.requiredTools,
     requiredTrust:
@@ -1236,6 +1241,8 @@ function spawnJob(template?: JobTemplate): Job {
     position: routed.position,
     source: nextTemplate.source,
     submitter: nextTemplate.submitter,
+    referenceUrl: nextTemplate.referenceUrl,
+    deliveryTarget: nextTemplate.deliveryTarget,
     requestedSkills: nextTemplate.requestedSkills,
     requiredTools: nextTemplate.requiredTools,
     requiredTrust: nextTemplate.requiredTrust,
@@ -1596,7 +1603,6 @@ app.post("/jobs", (req, res) => {
     jobId: job.id,
     title: job.title,
     category: job.category,
-    priority: job.priority,
     source: job.source
   });
   addChat("operator-console", "Operator Console", `${job.title} submitted manually into the city.`, "decision", {
