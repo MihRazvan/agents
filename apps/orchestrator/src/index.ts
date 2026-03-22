@@ -602,6 +602,72 @@ function setAgentIdle(agentId?: string): void {
   setAgentDestination(agent, hubPoint(agent.role));
 }
 
+function riskLevelForJob(job: Pick<Job, "priority" | "requiredTrust" | "category">): Job["riskLevel"] {
+  if (job.priority === "critical" || job.requiredTrust >= 0.82 || job.category === "move_contract" || job.category === "contract_audit") {
+    return "high";
+  }
+  if (job.priority === "priority" || job.requiredTrust >= 0.72) {
+    return "medium";
+  }
+  return "low";
+}
+
+function compactSkills(skills: string[]): string {
+  return skills.slice(0, 3).join(", ");
+}
+
+function stageRoutingReason(
+  agent: AgentRuntimeState,
+  step: { key: AgentPhase; role: AgentRole; label: string },
+  job: Job,
+  score: number
+): string {
+  if (step.role === "scout") {
+    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it is the highest-trust intake agent available for ${JOB_ROUTING[job.category].label}.`;
+  }
+  if (step.role === "planner") {
+    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it specializes in decomposition, policy checks, and capability matching.`;
+  }
+  if (step.role === "builder") {
+    const skillOverlap = job.requestedSkills.filter((skill) =>
+      agent.capabilities.primarySkills.some((entry) => entry.toLowerCase().includes(skill.toLowerCase()))
+    );
+    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)}. Matched ${skillOverlap.length}/${job.requestedSkills.length} requested skills and ${agent.kind === "plugin" ? "adds plugin specialization" : "is a core city specialist"}.`;
+  }
+  if (step.role === "verifier") {
+    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it carries the strongest trust profile for review and evidence checks.`;
+  }
+  return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it has the strongest trust profile for final delivery and receipt publishing.`;
+}
+
+function stageGuardrailSummary(agent: AgentRuntimeState, step: { role: AgentRole }, job: Job, threshold: number): string {
+  const toolView =
+    step.role === "builder"
+      ? job.requiredTools.join(", ")
+      : agent.capabilities.supportedTools.slice(0, 3).join(", ");
+
+  return `Trust ${agent.trustScore.toFixed(2)} >= ${threshold.toFixed(2)} | tools in play: ${toolView} | retries used: ${job.retries}/${budget.maxRetriesPerJob}`;
+}
+
+function updateJobDecisionState(
+  job: Job,
+  update: Partial<
+    Pick<
+      Job,
+      | "activeStageLabel"
+      | "routingReason"
+      | "guardrailSummary"
+      | "blockedReason"
+      | "selectedAgentId"
+      | "selectedAgentName"
+      | "status"
+      | "outputSummary"
+    >
+  >
+): void {
+  Object.assign(job, update);
+}
+
 function scoreAgentForJob(agent: AgentRuntimeState, job: Job): number {
   const skillMatches = job.requestedSkills.filter((skill) =>
     agent.capabilities.primarySkills.some((entry) => entry.toLowerCase().includes(skill.toLowerCase()))
@@ -671,13 +737,28 @@ function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState 
   const previousActor = findAgent(job.ownerAgentId);
   const candidates = findEligibleAgents(step.role, job);
   const candidate = candidates[0] ?? null;
+  const trustThreshold = stageTrustThreshold(step.role, job);
 
   if (!candidate) {
     const capableAgents = findCapableAgents(step.role, job);
     if (capableAgents.length > 0) {
+      const candidateNames = capableAgents.slice(0, 3).map((agent) => agent.name).join(", ");
+      updateJobDecisionState(job, {
+        activeStageLabel: step.label,
+        status: workflow.stage < 2 ? "queued" : job.status,
+        blockedReason: `Waiting for an available ${step.role}. Qualified agents are busy: ${candidateNames}.`,
+        routingReason: `${JOB_ROUTING[job.category].label} is ready for ${step.label}, but all qualified ${step.role} agents are occupied.`,
+        guardrailSummary: `Trust gate: ${trustThreshold.toFixed(2)} | tools: ${job.requiredTools.join(", ")} | budget remaining: ${budget.maxToolCalls - budget.usedToolCalls}`
+      });
       return null;
     }
 
+    updateJobDecisionState(job, {
+      activeStageLabel: step.label,
+      blockedReason: `No ${step.role} cleared trust ${trustThreshold.toFixed(2)} and capability checks for ${JOB_ROUTING[job.category].label}.`,
+      routingReason: `${JOB_ROUTING[job.category].label} is blocked at ${step.label} because the marketplace has no qualified ${step.role}.`,
+      guardrailSummary: `Rejected by safety policy: required trust ${trustThreshold.toFixed(2)} | tools: ${job.requiredTools.join(", ")}`
+    });
     cinematicFocus = job.id;
     addLog("safety", "policy-engine", "Trust gate blocked job handoff", {
       jobId: job.id,
@@ -700,7 +781,16 @@ function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState 
   workflow.activeAgentId = candidate.id;
   job.ownerAgentId = candidate.id;
   job.assignedAgentIds = [...new Set([...job.assignedAgentIds, candidate.id])];
-  job.status = workflow.stage < 2 ? "negotiating" : workflow.stage === 3 ? "verifying" : "in_progress";
+  const candidateScore = scoreAgentForJob(candidate, job);
+  updateJobDecisionState(job, {
+    activeStageLabel: step.label,
+    status: workflow.stage < 2 ? "negotiating" : workflow.stage === 3 ? "verifying" : "in_progress",
+    selectedAgentId: candidate.id,
+    selectedAgentName: candidate.name,
+    blockedReason: undefined,
+    routingReason: stageRoutingReason(candidate, step, job, candidateScore),
+    guardrailSummary: stageGuardrailSummary(candidate, step, job, trustThreshold)
+  });
   cinematicFocus = job.id;
 
   addLog("decision", candidate.id, `Assigned ${step.label} stage to ${candidate.name}`, {
@@ -708,6 +798,7 @@ function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState 
     category: job.category,
     stage: workflow.stage,
     trustScore: candidate.trustScore,
+    score: candidateScore,
     kind: candidate.kind,
     color: AGENT_COLORS[candidate.role]
   });
@@ -776,6 +867,10 @@ function runToolCall(step: { label: string; key: AgentPhase }, actor: AgentRunti
   if (job.retries > budget.maxRetriesPerJob) {
     job.status = "failed";
     job.outputSummary = "Retry budget exhausted before delivery";
+    updateJobDecisionState(job, {
+      blockedReason: `Retry budget exhausted after ${job.retries} failed attempts.`,
+      guardrailSummary: `Retries ${job.retries}/${budget.maxRetriesPerJob} | budget used ${budget.usedToolCalls}/${budget.maxToolCalls}`
+    });
     addLog("failure", actor.id, "Job marked failed after retry budget exhausted", {
       jobId: job.id,
       retries: job.retries
@@ -843,6 +938,10 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
 
   if (step.key === "plan") {
     const topBuilder = findCapableAgents("builder", job)[0];
+    updateJobDecisionState(job, {
+      routingReason: `${actor.name} completed the plan and requested ${compactSkills(job.requestedSkills)} for execution.`,
+      guardrailSummary: `Planned trust floor ${job.requiredTrust.toFixed(2)} | tools needed: ${job.requiredTools.join(", ")} | preferred route: ${JOB_ROUTING[job.category].zoneName}`
+    });
     addChat(actor.id, actor.name, `Plan ready. Needs ${job.requestedSkills.join(", ")} with trust >= ${job.requiredTrust.toFixed(2)}.`, "decision", {
       recipientId: topBuilder?.id,
       recipientName: topBuilder?.name,
@@ -852,7 +951,16 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
   }
 
   if (step.key === "verify") {
-    job.status = "verifying";
+    updateJobDecisionState(job, {
+      activeStageLabel: step.label,
+      status: "verifying",
+      routingReason: `${actor.name} completed verification for ${JOB_ROUTING[job.category].label}. Preparing final publish handoff.`,
+      guardrailSummary: onchain.validationEnabled
+        ? "Verification passed and validation receipt requested onchain."
+        : onchain.enabled
+          ? "Verification passed. Validation registry unavailable, so publish proceeds with reputation receipt only."
+          : "Verification passed in local mode with simulated validation receipt."
+    });
     if (onchain.validationEnabled) {
       void onchain.requestValidation(job);
     } else if (!onchain.enabled) {
@@ -868,8 +976,19 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
   }
 
   if (step.key === "submit") {
-    job.status = "completed";
-    job.outputSummary = finalOutputSummary(job, actor);
+    const outputSummary = finalOutputSummary(job, actor);
+    updateJobDecisionState(job, {
+      activeStageLabel: step.label,
+      status: "completed",
+      blockedReason: undefined,
+      guardrailSummary: onchain.reputationEnabled
+        ? "Publish approved. Reputation receipt requested from feedback wallet on Sepolia."
+        : onchain.enabled
+          ? "Publish approved. Onchain writes disabled for reputation."
+          : "Publish approved in local simulation mode.",
+      routingReason: `${actor.name} packaged the final deliverable and sealed the marketplace handoff.`,
+      outputSummary
+    });
     if (onchain.reputationEnabled) {
       void onchain.recordJobCompletion(job, actor);
     } else if (!onchain.enabled) {
@@ -969,6 +1088,7 @@ function spawnJob(template?: JobTemplate): Job {
     summary: nextTemplate.summary,
     category: nextTemplate.category,
     priority: nextTemplate.priority,
+    riskLevel: riskLevelForJob(nextTemplate),
     status: "queued",
     position: routed.position,
     source: nextTemplate.source,
@@ -979,7 +1099,10 @@ function spawnJob(template?: JobTemplate): Job {
     deliverable: nextTemplate.deliverable,
     retries: 0,
     assignedAgentIds: [],
-    timeline: []
+    timeline: [],
+    activeStageLabel: "discover",
+    routingReason: `${routed.district.name} chosen because ${routing.rationale}`,
+    guardrailSummary: `Trust floor ${nextTemplate.requiredTrust.toFixed(2)} | tools: ${nextTemplate.requiredTools.join(", ")} | retry limit: ${budget.maxRetriesPerJob}`
   };
 
   jobs.push(job);
@@ -1022,6 +1145,10 @@ function processJobs(): void {
     if (budget.usedToolCalls >= budget.maxToolCalls) {
       job.status = "failed";
       job.outputSummary = "Aborted because the compute budget was exhausted";
+      updateJobDecisionState(job, {
+        blockedReason: "Global tool-call budget exhausted. Intake and execution are halted for safety.",
+        guardrailSummary: `Budget exhausted: ${budget.usedToolCalls}/${budget.maxToolCalls} tool calls used`
+      });
       addLog("safety", "budget-guard", "Job aborted due to tool-call budget exhaustion", {
         jobId: job.id,
         usedToolCalls: budget.usedToolCalls
@@ -1039,7 +1166,12 @@ function processJobs(): void {
         const step = stageByIndex[workflow.stage];
         const capableAgents = findCapableAgents(step.role, job);
         if (capableAgents.length > 0) {
-          job.status = workflow.stage < 2 ? "queued" : job.status;
+          updateJobDecisionState(job, {
+            activeStageLabel: step.label,
+            status: workflow.stage < 2 ? "queued" : job.status,
+            blockedReason: `Waiting for ${step.role} availability. Next qualified agent: ${capableAgents[0]?.name ?? "unknown"}.`,
+            guardrailSummary: `Trust gate already passed | waiting on availability | budget remaining: ${budget.maxToolCalls - budget.usedToolCalls}`
+          });
           if (!workflow.lastWaitLogTick || tick - workflow.lastWaitLogTick >= 24) {
             workflow.lastWaitLogTick = tick;
             addLog("state", "policy-engine", "Job waiting for qualified agent to become available", {
@@ -1055,6 +1187,10 @@ function processJobs(): void {
         if (job.retries > budget.maxRetriesPerJob) {
           job.status = "failed";
           job.outputSummary = "No eligible agent cleared trust and capability checks";
+          updateJobDecisionState(job, {
+            blockedReason: `Marketplace could not find a qualified ${step.role} before retry budget was exhausted.`,
+            guardrailSummary: `Trust floor ${stageTrustThreshold(step.role, job).toFixed(2)} | retries ${job.retries}/${budget.maxRetriesPerJob}`
+          });
           addLog("failure", "policy-engine", "Job failed after trust-gate retries", {
             jobId: job.id,
             retries: job.retries

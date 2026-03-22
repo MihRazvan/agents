@@ -357,6 +357,56 @@ button.roster-item {
   font-size: 0.68rem;
 }
 
+.job-detail-card {
+  border-radius: 8px;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid rgba(134, 213, 255, 0.15);
+  background: rgba(13, 26, 45, 0.72);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.job-detail-live {
+  border-color: rgba(125, 224, 255, 0.18);
+}
+
+.job-detail-complete {
+  border-color: rgba(92, 255, 199, 0.24);
+  background: rgba(10, 40, 35, 0.5);
+}
+
+.job-detail-failed {
+  border-color: rgba(255, 127, 127, 0.24);
+  background: rgba(52, 19, 19, 0.5);
+}
+
+.job-detail-title,
+.job-detail-meta,
+.job-detail-copy {
+  margin: 0;
+}
+
+.job-detail-title {
+  color: #e9f4ff;
+  font-size: 0.72rem;
+}
+
+.job-detail-meta {
+  margin-top: 0.2rem;
+  color: #a7c1e4;
+  font-size: 0.66rem;
+}
+
+.job-detail-copy {
+  margin-top: 0.28rem;
+  color: #d4e4fa;
+  font-size: 0.66rem;
+  line-height: 1.45;
+}
+
+.job-detail-warning {
+  color: #ffd0c5;
+}
+
 .receipt-hash {
   margin-top: 0.18rem;
   font-size: 0.72rem;

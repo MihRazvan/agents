@@ -14,6 +14,7 @@ export type JobCategory =
   | "contract_audit";
 
 export type JobPriority = "routine" | "priority" | "critical";
+export type JobRiskLevel = "low" | "medium" | "high";
 
 export interface Vec2 {
   x: number;
@@ -54,6 +55,7 @@ export interface Job {
   summary: string;
   category: JobCategory;
   priority: JobPriority;
+  riskLevel: JobRiskLevel;
   status: JobStatus;
   position: Vec2;
   source: "operator" | "github" | "api" | "agent";
@@ -66,6 +68,12 @@ export interface Job {
   ownerAgentId?: string;
   assignedAgentIds: string[];
   timeline: string[];
+  activeStageLabel: string;
+  routingReason: string;
+  guardrailSummary: string;
+  blockedReason?: string;
+  selectedAgentId?: string;
+  selectedAgentName?: string;
   outputSummary?: string;
 }
 

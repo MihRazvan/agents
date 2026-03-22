@@ -31,6 +31,10 @@ function formatStatus(status: string): string {
   return status.replace(/_/g, " ");
 }
 
+function formatRisk(risk: string): string {
+  return risk.charAt(0).toUpperCase() + risk.slice(1);
+}
+
 export default function App() {
   const [snapshot, setSnapshot] = useState<WorldSnapshot | null>(null);
   const [manifest, setManifest] = useState<AgentManifest | null>(null);
@@ -337,11 +341,22 @@ export default function App() {
                 <h2>Live Jobs</h2>
                 <div className="feed-list">
                   {(snapshot?.jobs ?? []).map((job) => (
-                    <p key={job.id} className={job.status === "failed" ? "log-failure" : job.status === "completed" ? "log-onchain" : "log-decision"}>
-                      [{formatStatus(job.status)}] {job.title}
-                      <br />
-                      {JOB_ROUTING[job.category].label} | {job.submitter} | Trust {job.requiredTrust.toFixed(2)}
-                    </p>
+                    <div
+                      key={job.id}
+                      className={`job-detail-card ${
+                        job.status === "failed" ? "job-detail-failed" : job.status === "completed" ? "job-detail-complete" : "job-detail-live"
+                      }`}
+                    >
+                      <p className="job-detail-title">
+                        [{formatStatus(job.status)}] {job.title}
+                      </p>
+                      <p className="job-detail-meta">
+                        {JOB_ROUTING[job.category].label} | {job.submitter} | {formatRisk(job.riskLevel)} risk | Stage {job.activeStageLabel}
+                      </p>
+                      <p className="job-detail-copy">{job.routingReason}</p>
+                      <p className="job-detail-copy">{job.guardrailSummary}</p>
+                      {job.blockedReason ? <p className="job-detail-copy job-detail-warning">Blocked: {job.blockedReason}</p> : null}
+                    </div>
                   ))}
                 </div>
               </section>
