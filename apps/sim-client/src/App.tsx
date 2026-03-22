@@ -356,6 +356,8 @@ export default function App() {
                       <p className="job-detail-copy">{job.routingReason}</p>
                       <p className="job-detail-copy">{job.guardrailSummary}</p>
                       {job.blockedReason ? <p className="job-detail-copy job-detail-warning">Blocked: {job.blockedReason}</p> : null}
+                      {job.outputSummary ? <p className="job-detail-copy">Output: {job.outputSummary}</p> : null}
+                      {job.artifactPath ? <p className="job-detail-copy">Artifacts: {job.artifactPath}</p> : null}
                     </div>
                   ))}
                 </div>

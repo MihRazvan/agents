@@ -31,6 +31,7 @@ import {
   type WsMessage
 } from "@trust-city/shared";
 import { createNavigation } from "./navigation.js";
+import { runGithubIssueStage } from "./githubIssueLane.js";
 import { OnchainManager } from "./onchain.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -827,6 +828,91 @@ function stageFailureChance(stage: number, job: Job, actor: AgentRuntimeState): 
   return Math.min(0.42, Math.max(0.04, base + categoryPenalty + stage * 0.03 - trustRelief));
 }
 
+function runGithubBugfixStage(step: { label: string; key: AgentPhase }, actor: AgentRuntimeState, job: Job): boolean {
+  try {
+    const result = runGithubIssueStage(rootDir, step.key as "plan" | "execute" | "verify" | "submit", job, (message, context) => {
+      addLog("tool_call", actor.id, message, {
+        jobId: job.id,
+        stage: step.key,
+        ...context
+      });
+    });
+
+    job.artifactPath = result.artifactDir;
+
+    if (step.key === "plan") {
+      updateJobDecisionState(job, {
+        routingReason: `${actor.name} converted the issue into a concrete execution plan and saved the GitHub evidence bundle.`,
+        guardrailSummary: `Issue source: ${result.issueSource} | artifact dir: ${path.relative(rootDir, result.artifactDir)} | retries used: ${job.retries}/${budget.maxRetriesPerJob}`
+      });
+      addChat(actor.id, actor.name, `Issue captured from ${result.issueSource === "github_api" ? "GitHub API" : "the city queue"}. Plan written for execution.`, "decision", {
+        jobId: job.id,
+        kind: "tool"
+      });
+      return true;
+    }
+
+    if (step.key === "execute") {
+      updateJobDecisionState(job, {
+        routingReason: `${actor.name} patched the sandbox workspace and produced a real diff artifact for the GitHub bugfix lane.`,
+        guardrailSummary: `Patch generated in ${path.relative(rootDir, result.artifactDir)} | awaiting test verification`
+      });
+      addChat(actor.id, actor.name, "Patch prepared in the sandbox workspace. Handing off to verification.", "decision", {
+        jobId: job.id,
+        kind: "tool"
+      });
+      return true;
+    }
+
+    if (step.key === "verify") {
+      if (!result.testPassed) {
+        updateJobDecisionState(job, {
+          blockedReason: "Verifier ran the sandbox tests and they failed. The job is returning to execution for correction.",
+          guardrailSummary: `Tests failed in ${path.relative(rootDir, result.artifactDir)} | publish blocked until green`
+        });
+        return false;
+      }
+
+      updateJobDecisionState(job, {
+        blockedReason: undefined,
+        routingReason: `${actor.name} ran the real sandbox test suite and confirmed the GitHub issue patch is valid.`,
+        guardrailSummary: `Tests passed in ${path.relative(rootDir, result.artifactDir)} | ready for publish`
+      });
+      addChat(actor.id, actor.name, "Sandbox tests passed. Safe to publish the bugfix bundle.", "decision", {
+        jobId: job.id,
+        kind: "verification"
+      });
+      return true;
+    }
+
+    updateJobDecisionState(job, {
+      routingReason: `${actor.name} packaged the GitHub issue bundle, including issue evidence, patch diff, and test output.`,
+      guardrailSummary: `Delivery bundle written to ${path.relative(rootDir, result.artifactDir)}`
+    });
+    addChat(actor.id, actor.name, "Delivery bundle sealed with patch, tests, and issue evidence.", "decision", {
+      jobId: job.id,
+      kind: "delivery"
+    });
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown GitHub issue lane failure";
+    updateJobDecisionState(job, {
+      blockedReason: message,
+      guardrailSummary: `GitHub issue lane failed during ${step.key}. Retry required before publish.`
+    });
+    addLog("failure", actor.id, "GitHub issue lane step failed", {
+      jobId: job.id,
+      stage: step.key,
+      error: message
+    });
+    addChat(actor.id, actor.name, `GitHub lane failed at ${step.key}: ${message}.`, "warning", {
+      jobId: job.id,
+      kind: "verification"
+    });
+    return false;
+  }
+}
+
 function runToolCall(step: { label: string; key: AgentPhase }, actor: AgentRuntimeState, job: Job): boolean {
   budget.usedToolCalls += 1;
 
@@ -845,6 +931,10 @@ function runToolCall(step: { label: string; key: AgentPhase }, actor: AgentRunti
     jobId: job.id,
     kind: "tool"
   });
+
+  if (job.category === "github_bugfix" && step.key !== "discover") {
+    return runGithubBugfixStage(step, actor, job);
+  }
 
   const failed = Math.random() < stageFailureChance(workflows.get(job.id)?.stage ?? 0, job, actor);
   if (!failed) {
@@ -885,7 +975,7 @@ function finalOutputSummary(job: Job, actor: AgentRuntimeState): string {
     return `Preview ready and packaged by ${actor.name}`;
   }
   if (job.category === "github_bugfix") {
-    return `Patch and test evidence prepared by ${actor.name}`;
+    return `Patch and test evidence prepared by ${actor.name}${job.artifactPath ? ` at ${path.relative(rootDir, job.artifactPath)}` : ""}`;
   }
   if (job.category === "protocol_research") {
     return `Research brief and source digest assembled by ${actor.name}`;
