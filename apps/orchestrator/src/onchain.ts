@@ -1,18 +1,31 @@
-import "dotenv/config";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { ethers } from "ethers";
+import { config as loadEnv } from "dotenv";
 import { type AgentManifest, type AgentRuntimeState, type Job } from "@trust-city/shared";
 
+declare global {
+  interface BigInt {
+    toJSON?: () => string;
+  }
+}
+
 const require = createRequire(import.meta.url);
-const { AgentRole, ChaosChainSDK, NetworkConfig, getContractAddresses } = require("@chaoschain/sdk") as typeof import("@chaoschain/sdk");
+const { AgentRole, ChaosChainSDK, NetworkConfig, REPUTATION_REGISTRY_ABI, getContractAddresses } = require("@chaoschain/sdk") as typeof import("@chaoschain/sdk");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "../../..");
+loadEnv({ path: path.join(rootDir, ".env") });
 const statePath = path.join(rootDir, "onchain_state.json");
+
+if (typeof BigInt.prototype.toJSON !== "function") {
+  BigInt.prototype.toJSON = function toJSON() {
+    return this.toString();
+  };
+}
 
 interface OnchainState {
   operatorAgentId?: string;
@@ -37,6 +50,10 @@ function boolFromEnv(value: string | undefined, fallback: boolean): boolean {
 
 function normalizePrivateKey(value: string): string {
   return value.startsWith("0x") ? value : `0x${value}`;
+}
+
+function configuredRpcUrl(): string {
+  return process.env.SEPOLIA_RPC_URL?.trim() || "https://ethereum-sepolia-rpc.publicnode.com";
 }
 
 function metadataDomain(): string {
@@ -105,6 +122,8 @@ export class OnchainManager {
   private readonly callbacks: OnchainCallbacks;
   private readonly manifest: AgentManifest;
   private readonly sdk: InstanceType<typeof ChaosChainSDK> | null;
+  private readonly feedbackWallet: ethers.Wallet | null;
+  private readonly reputationContract: ethers.Contract | null;
   private state: OnchainState | null = null;
   private initPromise: Promise<void> | null = null;
   private reputationWrites = new Set<string>();
@@ -121,6 +140,8 @@ export class OnchainManager {
       this.validationEnabled = false;
       this.reputationEnabled = false;
       this.sdk = null;
+      this.feedbackWallet = null;
+      this.reputationContract = null;
       return;
     }
 
@@ -137,19 +158,23 @@ export class OnchainManager {
 
     this.enabled = enabled;
     this.validationEnabled = enabled && boolFromEnv(process.env.ENABLE_VALIDATION_WRITES, false);
-    this.reputationEnabled = enabled && boolFromEnv(process.env.ENABLE_REPUTATION_WRITES, true);
+    const reputationRequested = enabled && boolFromEnv(process.env.ENABLE_REPUTATION_WRITES, true);
 
     if (!enabled) {
       this.sdk = null;
+      this.feedbackWallet = null;
+      this.reputationContract = null;
+      this.reputationEnabled = false;
       return;
     }
 
     const network = NetworkConfig.ETHEREUM_SEPOLIA;
     const defaultContracts = getContractAddresses(network);
+    const rpcUrl = configuredRpcUrl();
     this.callbacks.onInfo("Configured ERC-8004 network", {
       network,
       contracts: defaultContracts,
-      rpcUrl: process.env.SEPOLIA_RPC_URL ?? "sdk-default"
+      rpcUrl
     });
 
     this.sdk = new ChaosChainSDK({
@@ -158,7 +183,69 @@ export class OnchainManager {
       agentRole: AgentRole.ORCHESTRATOR,
       network,
       privateKey: normalizedPrivateKey,
-      rpcUrl: process.env.SEPOLIA_RPC_URL
+      rpcUrl
+    });
+
+    const feedbackPrivateKey = process.env.FEEDBACK_CLIENT_PRIVATE_KEY;
+    const feedbackWalletAddress = process.env.FEEDBACK_CLIENT_WALLET?.toLowerCase();
+    if (!reputationRequested) {
+      this.reputationEnabled = false;
+      this.feedbackWallet = null;
+      this.reputationContract = null;
+      return;
+    }
+
+    if (!feedbackPrivateKey) {
+      this.reputationEnabled = false;
+      this.feedbackWallet = null;
+      this.reputationContract = null;
+      this.callbacks.onInfo("Reputation writes disabled: FEEDBACK_CLIENT_PRIVATE_KEY is not configured. ERC-8004 blocks self-feedback.", {
+        operatorWallet: manifest.operatorWallet
+      });
+      return;
+    }
+
+    const normalizedFeedbackKey = normalizePrivateKey(feedbackPrivateKey);
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const feedbackWallet = new ethers.Wallet(normalizedFeedbackKey, provider);
+    const derivedFeedbackWallet = feedbackWallet.address.toLowerCase();
+
+    if (feedbackWalletAddress && feedbackWalletAddress !== derivedFeedbackWallet) {
+      this.reputationEnabled = false;
+      this.feedbackWallet = null;
+      this.reputationContract = null;
+      this.callbacks.onError("FEEDBACK_CLIENT_WALLET does not match FEEDBACK_CLIENT_PRIVATE_KEY. Reputation writes disabled.", {
+        configuredWallet: process.env.FEEDBACK_CLIENT_WALLET,
+        derivedWallet: feedbackWallet.address
+      });
+      return;
+    }
+
+    if (derivedFeedbackWallet === configuredWallet) {
+      this.reputationEnabled = false;
+      this.feedbackWallet = null;
+      this.reputationContract = null;
+      this.callbacks.onError("Reputation writes disabled: feedback client matches operator wallet. ERC-8004 forbids self-feedback.", {
+        operatorWallet: manifest.operatorWallet
+      });
+      return;
+    }
+
+    const reputationRegistryAddress =
+      process.env.REPUTATION_REGISTRY_ADDRESS?.trim() || defaultContracts.reputationRegistry;
+    if (!reputationRegistryAddress) {
+      this.reputationEnabled = false;
+      this.feedbackWallet = null;
+      this.reputationContract = null;
+      this.callbacks.onError("Reputation writes disabled: missing REPUTATION_REGISTRY_ADDRESS.", {});
+      return;
+    }
+
+    this.reputationEnabled = true;
+    this.feedbackWallet = feedbackWallet;
+    this.reputationContract = new ethers.Contract(reputationRegistryAddress, REPUTATION_REGISTRY_ABI, feedbackWallet);
+    this.callbacks.onInfo("Configured external feedback client for reputation writes", {
+      feedbackWallet: feedbackWallet.address
     });
   }
 
@@ -219,7 +306,7 @@ export class OnchainManager {
   }
 
   async recordJobCompletion(job: Job, actor: AgentRuntimeState): Promise<void> {
-    if (!this.enabled || !this.sdk || !this.reputationEnabled) {
+    if (!this.enabled || !this.reputationEnabled || !this.reputationContract || !this.feedbackWallet) {
       return;
     }
 
@@ -236,30 +323,34 @@ export class OnchainManager {
       }
 
       const rating = ratingForJob(job);
-      const txHash = await this.sdk.giveFeedback({
-        agentId: BigInt(state.operatorAgentId),
-        rating,
-        feedbackUri: `${process.env.AGENT_METADATA_URI ?? "https://example.com/feedback"}#${job.id}`,
-        feedbackData: {
-          tag1: "job_completion",
-          tag2: job.category,
-          endpoint: actor.name,
-          value: rating,
-          content: job.outputSummary ?? job.title
-        }
-      });
+      const feedbackUri = `${process.env.AGENT_METADATA_URI ?? "https://example.com/feedback"}#${job.id}`;
+      const feedbackHash = ethers.keccak256(ethers.toUtf8Bytes(job.outputSummary ?? job.title));
+      const tx = await this.reputationContract.giveFeedback(
+        BigInt(state.operatorAgentId),
+        BigInt(rating),
+        0,
+        "job_completion",
+        job.category,
+        actor.name,
+        feedbackUri,
+        feedbackHash
+      );
+      const receipt = await tx.wait();
+      const txHash = receipt.hash;
 
       state.reputationTxHashes.push(txHash);
       await saveState(state);
       this.callbacks.onReceipt("reputation_registry_update", txHash, {
         agentId: state.operatorAgentId,
         jobId: job.id,
-        rating
+        rating,
+        feedbackWallet: this.feedbackWallet.address
       });
     } catch (error) {
       this.callbacks.onError("Reputation write failed", {
         jobId: job.id,
         actorId: actor.id,
+        feedbackWallet: this.feedbackWallet.address,
         error: error instanceof Error ? error.message : String(error)
       });
     }

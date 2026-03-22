@@ -1,6 +1,6 @@
 {
   "agentName": "Trust City Exchange",
-  "operatorWallet": "0xD3aDbeefD3aDbeefD3aDbeefD3aDbeefD3aDbeef",
+  "operatorWallet": "0x92AAe0857979a139344f5b6F008e71F27A507522",
   "erc8004Identity": "agent:erc8004:trust-city-exchange",
   "supportedTools": [
     "github_api",

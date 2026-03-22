@@ -1,4 +1,3 @@
-import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -6,6 +5,7 @@ import { writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { config as loadEnv } from "dotenv";
 import { WebSocketServer } from "ws";
 import {
   AGENT_COLORS,
@@ -34,6 +34,7 @@ import { OnchainManager } from "./onchain.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "../../..");
+loadEnv({ path: path.join(rootDir, ".env") });
 
 const HTTP_PORT = Number(process.env.ORCHESTRATOR_PORT ?? "8787");
 const LOOP_INTERVAL_MS = 400;
