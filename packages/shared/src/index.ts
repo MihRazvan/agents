@@ -166,7 +166,9 @@ export interface OnchainStatus {
   identityTxHash?: string;
   metadataTxHash?: string;
   reputationEnabled: boolean;
+  validationRequested: boolean;
   validationEnabled: boolean;
+  validationReason?: string;
   reputationTxHashes: string[];
   validationTxHashes: string[];
 }

@@ -223,8 +223,18 @@ export default function App() {
               <span>Reputation:</span> {onchainStatus?.reputationEnabled ? "Enabled" : "Disabled"}
             </p>
             <p className="manifest-item">
-              <span>Validation:</span> {onchainStatus?.validationEnabled ? "Enabled" : "Disabled"}
+              <span>Validation:</span>{" "}
+              {onchainStatus?.validationEnabled
+                ? "Enabled"
+                : onchainStatus?.validationRequested
+                  ? "Requested but unavailable"
+                  : "Disabled"}
             </p>
+            {!onchainStatus?.validationEnabled && onchainStatus?.validationReason ? (
+              <p className="manifest-item">
+                <span>Validation Note:</span> {onchainStatus.validationReason}
+              </p>
+            ) : null}
             <p className="manifest-item">
               <span>Chain:</span> {onchainStatus?.network ?? "ethereum-sepolia"} ({onchainStatus?.chainId ?? "11155111"})
             </p>

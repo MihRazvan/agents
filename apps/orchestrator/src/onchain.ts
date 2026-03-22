@@ -13,7 +13,7 @@ declare global {
 }
 
 const require = createRequire(import.meta.url);
-const { AgentRole, ChaosChainSDK, NetworkConfig, REPUTATION_REGISTRY_ABI, getContractAddresses } = require("@chaoschain/sdk") as typeof import("@chaoschain/sdk");
+const { AgentRole, ChaosChainSDK, NetworkConfig, REPUTATION_REGISTRY_ABI, VALIDATION_REGISTRY_ABI, getContractAddresses } = require("@chaoschain/sdk") as typeof import("@chaoschain/sdk");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -117,19 +117,23 @@ function ratingForJob(job: Job): number {
 
 export class OnchainManager {
   readonly enabled: boolean;
-  readonly validationEnabled: boolean;
+  readonly validationRequested: boolean;
+  validationEnabled: boolean;
   readonly reputationEnabled: boolean;
   private readonly callbacks: OnchainCallbacks;
   private readonly manifest: AgentManifest;
   private readonly sdk: InstanceType<typeof ChaosChainSDK> | null;
   private readonly feedbackWallet: ethers.Wallet | null;
   private readonly reputationContract: ethers.Contract | null;
+  private readonly validationContract: ethers.Contract | null;
   private readonly rpcUrl: string;
   private readonly networkLabel: string;
   private readonly disabledReason?: string;
+  private validationReason?: string;
   private state: OnchainState | null = null;
   private initPromise: Promise<void> | null = null;
   private reputationWrites = new Set<string>();
+  private validationAuthChecked = false;
 
   constructor(manifest: AgentManifest, callbacks: OnchainCallbacks) {
     this.manifest = manifest;
@@ -143,11 +147,13 @@ export class OnchainManager {
 
     if (!enabled || !privateKey) {
       this.enabled = false;
+      this.validationRequested = false;
       this.validationEnabled = false;
       this.reputationEnabled = false;
       this.sdk = null;
       this.feedbackWallet = null;
       this.reputationContract = null;
+      this.validationContract = null;
       this.disabledReason = privateKey ? "ENABLE_ONCHAIN_WRITES is false." : "OPERATOR_PRIVATE_KEY is missing.";
       return;
     }
@@ -165,13 +171,15 @@ export class OnchainManager {
     }
 
     this.enabled = enabled;
-    this.validationEnabled = enabled && boolFromEnv(process.env.ENABLE_VALIDATION_WRITES, false);
+    this.validationRequested = enabled && boolFromEnv(process.env.ENABLE_VALIDATION_WRITES, false);
+    this.validationEnabled = this.validationRequested;
     const reputationRequested = enabled && boolFromEnv(process.env.ENABLE_REPUTATION_WRITES, true);
 
     if (!enabled) {
       this.sdk = null;
       this.feedbackWallet = null;
       this.reputationContract = null;
+      this.validationContract = null;
       this.reputationEnabled = false;
       return;
     }
@@ -194,6 +202,16 @@ export class OnchainManager {
       privateKey: normalizedPrivateKey,
       rpcUrl
     });
+
+    const validationRegistryAddress =
+      process.env.VALIDATION_REGISTRY_ADDRESS?.trim() || defaultContracts.validationRegistry;
+    this.validationContract = validationRegistryAddress
+      ? new ethers.Contract(validationRegistryAddress, VALIDATION_REGISTRY_ABI, new ethers.Wallet(normalizedPrivateKey, new ethers.JsonRpcProvider(rpcUrl)))
+      : null;
+    if (this.validationRequested && !this.validationContract) {
+      this.validationEnabled = false;
+      this.validationReason = "VALIDATION_REGISTRY_ADDRESS is missing for this network.";
+    }
 
     const feedbackPrivateKey = process.env.FEEDBACK_CLIENT_PRIVATE_KEY;
     const feedbackWalletAddress = process.env.FEEDBACK_CLIENT_WALLET?.toLowerCase();
@@ -223,6 +241,7 @@ export class OnchainManager {
       this.reputationEnabled = false;
       this.feedbackWallet = null;
       this.reputationContract = null;
+      this.validationContract = this.validationContract;
       this.callbacks.onError("FEEDBACK_CLIENT_WALLET does not match FEEDBACK_CLIENT_PRIVATE_KEY. Reputation writes disabled.", {
         configuredWallet: process.env.FEEDBACK_CLIENT_WALLET,
         derivedWallet: feedbackWallet.address
@@ -234,6 +253,7 @@ export class OnchainManager {
       this.reputationEnabled = false;
       this.feedbackWallet = null;
       this.reputationContract = null;
+      this.validationContract = this.validationContract;
       this.callbacks.onError("Reputation writes disabled: feedback client matches operator wallet. ERC-8004 forbids self-feedback.", {
         operatorWallet: manifest.operatorWallet
       });
@@ -275,6 +295,45 @@ export class OnchainManager {
     }
 
     await this.initPromise;
+    await this.ensureValidationAuthorization();
+  }
+
+  private async ensureValidationAuthorization(): Promise<void> {
+    if (!this.validationRequested || !this.validationEnabled || !this.validationContract || this.validationAuthChecked) {
+      return;
+    }
+
+    this.validationAuthChecked = true;
+
+    const state = await this.ensureState();
+    if (!state.operatorAgentId) {
+      this.validationEnabled = false;
+      this.validationReason = "Missing operator agent identity for validation requests.";
+      return;
+    }
+
+    const probeHash = `0x${Buffer.from("trust-city-validation-probe").toString("hex").slice(0, 64).padEnd(64, "0")}`;
+    const probeUri = `${process.env.AGENT_METADATA_URI ?? "https://example.com/validation"}#probe`;
+
+    try {
+      await this.validationContract.validationRequest.estimateGas(
+        this.manifest.operatorWallet,
+        BigInt(state.operatorAgentId),
+        probeUri,
+        probeHash
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.validationEnabled = false;
+      this.validationReason =
+        message.includes("Not authorized")
+          ? "Sepolia validation registry requires an authorized verifier/studio flow. Direct requests from this operator are rejected."
+          : `Validation unavailable: ${message}`;
+      this.callbacks.onInfo("Validation writes disabled after authorization probe", {
+        reason: this.validationReason,
+        operatorWallet: this.manifest.operatorWallet
+      });
+    }
   }
 
   private async bootstrapOnce(): Promise<void> {
@@ -372,6 +431,9 @@ export class OnchainManager {
 
     try {
       await this.bootstrap();
+      if (!this.validationEnabled) {
+        return;
+      }
       const state = await this.ensureState();
       if (!state.operatorAgentId) {
         throw new Error("Missing operator agentId after bootstrap");
@@ -417,7 +479,9 @@ export class OnchainManager {
       identityTxHash: state.identityTxHash,
       metadataTxHash: state.metadataTxHash,
       reputationEnabled: this.reputationEnabled,
+      validationRequested: this.validationRequested,
       validationEnabled: this.validationEnabled,
+      validationReason: this.validationReason,
       reputationTxHashes: state.reputationTxHashes,
       validationTxHashes: state.validationTxHashes
     };
