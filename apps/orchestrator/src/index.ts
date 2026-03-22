@@ -116,6 +116,19 @@ interface PluginRegistrationRequest {
   specialty?: string;
 }
 
+interface JobSubmissionRequest {
+  title?: string;
+  summary?: string;
+  category?: JobCategory;
+  priority?: Job["priority"];
+  source?: Job["source"];
+  submitter?: string;
+  requestedSkills?: string[];
+  requiredTools?: string[];
+  requiredTrust?: number;
+  deliverable?: string;
+}
+
 const stageByIndex: Array<{ key: AgentPhase; role: AgentRole; label: string }> = [
   { key: "discover", role: "scout", label: "discover" },
   { key: "plan", role: "planner", label: "plan" },
@@ -580,6 +593,46 @@ function buildJobTemplates(): JobTemplate[] {
       deliverable: "Audit summary and verification receipt"
     }
   ];
+}
+
+function defaultTemplateForCategory(category: JobCategory): JobTemplate {
+  return (
+    buildJobTemplates().find((template) => template.category === category) ?? {
+      title: "Operator job",
+      summary: "Operator-submitted marketplace task.",
+      category,
+      priority: "priority",
+      source: "operator",
+      submitter: "Operator Console",
+      requestedSkills: ["analysis"],
+      requiredTools: ["registry_reader"],
+      requiredTrust: TRUST_THRESHOLD,
+      deliverable: "Execution bundle"
+    }
+  );
+}
+
+function normalizeJobSubmission(body: JobSubmissionRequest): JobTemplate | null {
+  if (!body.title || !body.summary || !body.category) {
+    return null;
+  }
+
+  const fallback = defaultTemplateForCategory(body.category);
+  return {
+    title: body.title.trim(),
+    summary: body.summary.trim(),
+    category: body.category,
+    priority: body.priority ?? fallback.priority,
+    source: body.source ?? "operator",
+    submitter: body.submitter?.trim() || "Operator Console",
+    requestedSkills: body.requestedSkills?.filter(Boolean) ?? fallback.requestedSkills,
+    requiredTools: body.requiredTools?.filter(Boolean) ?? fallback.requiredTools,
+    requiredTrust:
+      typeof body.requiredTrust === "number" && Number.isFinite(body.requiredTrust)
+        ? Math.min(0.99, Math.max(0.4, body.requiredTrust))
+        : fallback.requiredTrust,
+    deliverable: body.deliverable?.trim() || fallback.deliverable
+  };
 }
 
 function setAgentDestination(agent: AgentRuntimeState, destination: Vec2): void {
@@ -1523,6 +1576,37 @@ app.post("/plugins", (req, res) => {
 
 app.get("/jobs", (_req, res) => {
   res.json(jobs);
+});
+
+app.post("/jobs", (req, res) => {
+  const body = req.body as JobSubmissionRequest;
+  const template = normalizeJobSubmission(body);
+
+  if (!template) {
+    res.status(400).json({
+      ok: false,
+      error: "title, summary, and category are required",
+      allowedCategories: ["microsite_build", "github_bugfix", "protocol_research", "move_contract", "contract_audit"]
+    });
+    return;
+  }
+
+  const job = spawnJob(template);
+  addLog("decision", "operator-console", "Manual job submitted through API", {
+    jobId: job.id,
+    title: job.title,
+    category: job.category,
+    priority: job.priority,
+    source: job.source
+  });
+  addChat("operator-console", "Operator Console", `${job.title} submitted manually into the city.`, "decision", {
+    recipientId: "job-board",
+    recipientName: "Job Board",
+    jobId: job.id,
+    kind: "delivery"
+  });
+
+  res.status(201).json({ ok: true, job });
 });
 
 wss.on("connection", (socket) => {
