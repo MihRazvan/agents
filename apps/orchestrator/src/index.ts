@@ -1,3 +1,4 @@
+import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -28,6 +29,7 @@ import {
   type WsMessage
 } from "@trust-city/shared";
 import { createNavigation } from "./navigation.js";
+import { OnchainManager } from "./onchain.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -374,6 +376,36 @@ function addChat(actorId: string, actorName: string, message: string, tone: Chat
   trimChats();
 }
 
+function recordReceipt(action: string, txHash: string, jobId?: string, extra?: Record<string, unknown>): string {
+  receipts.push(txHash);
+  if (receipts.length > 100) {
+    receipts.splice(0, receipts.length - 100);
+  }
+  addLog("onchain", "erc8004-writer", `Onchain ${action} receipt committed`, {
+    txHash,
+    jobId,
+    ...extra
+  });
+  broadcast({ type: "receipt", payload: { txHash, action, jobId, timestamp: nowIso(), ...extra } });
+  return txHash;
+}
+
+function emitLocalReceipt(action: string, jobId?: string, extra?: Record<string, unknown>): string {
+  return recordReceipt(action, makeTxHash(), jobId, extra);
+}
+
+const onchain = new OnchainManager(manifest, {
+  onReceipt: (action, txHash, context) => {
+    recordReceipt(action, txHash, typeof context?.jobId === "string" ? context.jobId : undefined, context);
+  },
+  onInfo: (message, context) => {
+    addLog("state", "erc8004-writer", message, context);
+  },
+  onError: (message, context) => {
+    addLog("failure", "erc8004-writer", message, context);
+  }
+});
+
 function getSnapshot(): WorldSnapshot {
   return {
     timestamp: nowIso(),
@@ -649,21 +681,6 @@ function runToolCall(step: { label: string; key: AgentPhase }, actor: AgentRunti
   return false;
 }
 
-function emitReceipt(action: string, jobId?: string, extra?: Record<string, unknown>): string {
-  const txHash = makeTxHash();
-  receipts.push(txHash);
-  if (receipts.length > 100) {
-    receipts.splice(0, receipts.length - 100);
-  }
-  addLog("onchain", "erc8004-writer", `Onchain ${action} receipt committed`, {
-    txHash,
-    jobId,
-    ...extra
-  });
-  broadcast({ type: "receipt", payload: { txHash, action, jobId, timestamp: nowIso(), ...extra } });
-  return txHash;
-}
-
 function finalOutputSummary(job: Job, actor: AgentRuntimeState): string {
   if (job.category === "microsite_build") {
     return `Preview ready and packaged by ${actor.name}`;
@@ -717,14 +734,22 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
 
   if (step.key === "verify") {
     job.status = "verifying";
-    emitReceipt("validation_registry_write", job.id, { validator: actor.id });
+    if (onchain.validationEnabled) {
+      void onchain.requestValidation(job);
+    } else if (!onchain.enabled) {
+      emitLocalReceipt("validation_registry_write", job.id, { validator: actor.id });
+    }
     addChat(actor.id, actor.name, `Validation passed for ${JOB_ROUTING[job.category].label}.`, "decision");
   }
 
   if (step.key === "submit") {
     job.status = "completed";
     job.outputSummary = finalOutputSummary(job, actor);
-    emitReceipt("reputation_registry_update", job.id, { publisher: actor.id });
+    if (onchain.reputationEnabled) {
+      void onchain.recordJobCompletion(job, actor);
+    } else if (!onchain.enabled) {
+      emitLocalReceipt("reputation_registry_update", job.id, { publisher: actor.id });
+    }
     addLog("output", actor.id, "Job completed and submitted", {
       jobId: job.id,
       finalTimeline: job.timeline,
@@ -959,7 +984,9 @@ function registerPluginAgent(request: PluginRegistrationRequest): PluginAgentRec
       statusLine: "Awaiting marketplace jobs"
     });
 
-    emitReceipt("identity_registry_registration", undefined, { pluginAgentId: record.id, operatorWallet: record.operatorWallet });
+    if (!onchain.enabled) {
+      emitLocalReceipt("identity_registry_registration", undefined, { pluginAgentId: record.id, operatorWallet: record.operatorWallet });
+    }
     addLog("decision", "registry-plaza", "Plugin agent admitted to the city", {
       pluginAgentId: record.id,
       name: record.label,
@@ -1023,8 +1050,16 @@ function mainLoop(): void {
   tick += 1;
 
   if (tick === 1) {
-    emitReceipt("identity_registry_registration", undefined, { operatorWallet });
-    emitReceipt("operator_link_validation", undefined, { operatorWallet, erc8004Identity });
+    if (onchain.enabled) {
+      void onchain.bootstrap();
+      addLog("state", "erc8004-writer", "Real Sepolia writes enabled", {
+        chainId: process.env.CHAIN_ID ?? "11155111",
+        rpcUrl: process.env.SEPOLIA_RPC_URL ?? "sdk-default"
+      });
+    } else {
+      emitLocalReceipt("identity_registry_registration", undefined, { operatorWallet });
+      emitLocalReceipt("operator_link_validation", undefined, { operatorWallet, erc8004Identity });
+    }
     seedPlugins();
     spawnJob();
     spawnJob(jobQueue.find((job) => job.category === "move_contract"));
