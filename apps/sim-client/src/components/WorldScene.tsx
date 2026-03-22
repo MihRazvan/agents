@@ -11,6 +11,7 @@ import AnimatedAgentAvatar from "./AnimatedAgentAvatar";
 
 interface Props {
   snapshot: WorldSnapshot | null;
+  selectedAgentId?: string | null;
 }
 
 const USER_CONTROL_PAUSE_MS = 9000;
@@ -29,9 +30,16 @@ function priorityRank(priority: Job["priority"]): number {
   return 1;
 }
 
-function getFocusPoint(snapshot: WorldSnapshot | null): Vec2 {
+function getFocusPoint(snapshot: WorldSnapshot | null, selectedAgentId?: string | null): Vec2 {
   if (!snapshot) {
     return { x: 0, y: 0 };
+  }
+
+  if (selectedAgentId) {
+    const selectedAgent = snapshot.agents.find((agent) => agent.id === selectedAgentId);
+    if (selectedAgent) {
+      return selectedAgent.position;
+    }
   }
 
   const activeJobs = snapshot.jobs.filter((job) => job.status !== "completed" && job.status !== "failed");
@@ -62,7 +70,17 @@ function getFocusPoint(snapshot: WorldSnapshot | null): Vec2 {
   };
 }
 
-function CameraDirector({ snapshot, controlsRef, autoPausedUntilRef }: { snapshot: WorldSnapshot | null; controlsRef: RefObject<OrbitControlsImpl | null>; autoPausedUntilRef: MutableRefObject<number> }) {
+function CameraDirector({
+  snapshot,
+  selectedAgentId,
+  controlsRef,
+  autoPausedUntilRef
+}: {
+  snapshot: WorldSnapshot | null;
+  selectedAgentId?: string | null;
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  autoPausedUntilRef: MutableRefObject<number>;
+}) {
   const targetRef = useRef(new THREE.Vector3(0, 1.2, 1));
 
   useFrame((_, delta) => {
@@ -75,7 +93,7 @@ function CameraDirector({ snapshot, controlsRef, autoPausedUntilRef }: { snapsho
       return;
     }
 
-    const focus = getFocusPoint(snapshot);
+    const focus = getFocusPoint(snapshot, selectedAgentId);
     targetRef.current.set(focus.x, 1.35, focus.y);
 
     controls.target.lerp(targetRef.current, Math.min(1, delta * 1.85));
@@ -210,8 +228,8 @@ function latestChatsByActor(chats: ChatMessage[]): Map<string, ChatMessage> {
   return map;
 }
 
-export default function WorldScene({ snapshot }: Props) {
-  const focusPoint = useMemo(() => getFocusPoint(snapshot), [snapshot]);
+export default function WorldScene({ snapshot, selectedAgentId }: Props) {
+  const focusPoint = useMemo(() => getFocusPoint(snapshot, selectedAgentId), [snapshot, selectedAgentId]);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const autoPausedUntilRef = useRef(0);
   const userControllingRef = useRef(false);
@@ -344,7 +362,7 @@ export default function WorldScene({ snapshot }: Props) {
         </group>
       ))}
 
-      <CameraDirector snapshot={snapshot} controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
+      <CameraDirector snapshot={snapshot} selectedAgentId={selectedAgentId} controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
       <FreeRoamController controlsRef={controlsRef} autoPausedUntilRef={autoPausedUntilRef} />
       <StreamAnchorController controlsRef={controlsRef} onAnchorChunkChange={setStreamAnchor} />
       <OrbitControls

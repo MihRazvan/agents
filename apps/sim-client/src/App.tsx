@@ -37,6 +37,7 @@ export default function App() {
   const [receipts, setReceipts] = useState<ReceiptRecord[]>([]);
   const [plugins, setPlugins] = useState<PluginAgentRecord[]>([]);
   const [wsStatus, setWsStatus] = useState<"connecting" | "live" | "offline">("connecting");
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -150,6 +151,7 @@ export default function App() {
   }, [plugins]);
 
   const onchainStatus: OnchainStatus | null = snapshot?.onchainStatus ?? null;
+  const recentChats = useMemo(() => [...(snapshot?.chats ?? [])].slice(-18).reverse(), [snapshot?.chats]);
 
   return (
     <div className="app-shell">
@@ -165,8 +167,29 @@ export default function App() {
       </header>
 
       <main className="layout">
-        <section className="scene-panel">
-          <WorldScene snapshot={snapshot} />
+        <section className="scene-column">
+          <section className="scene-panel">
+            <WorldScene snapshot={snapshot} selectedAgentId={selectedAgentId} />
+          </section>
+
+          <section className="card chat-panel">
+            <div className="section-head">
+              <h2>Agent Chat</h2>
+              <p className="section-note">Live handoffs, coordination, and trust decisions.</p>
+            </div>
+            <div className="chat-list">
+              {recentChats.length === 0 ? (
+                <p className="chat-empty">No agent messages yet.</p>
+              ) : (
+                recentChats.map((chat) => (
+                  <div key={chat.id} className={`chat-item chat-item-${chat.tone}`}>
+                    <p className="chat-actor">{chat.actorName}</p>
+                    <p className="chat-message">{chat.message}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
         </section>
 
         <aside className="side-panel">
@@ -196,6 +219,31 @@ export default function App() {
             <p className="budget-line">
               Retry budget: {snapshot?.budget.maxRetriesPerJob ?? 0} | Active chats: {snapshot?.chats.length ?? 0}
             </p>
+          </section>
+
+          <section className="card roster-card">
+            <h2>Agent Roster</h2>
+            <div className="roster-list">
+              {(snapshot?.agents ?? []).map((agent) => (
+                <button
+                  type="button"
+                  className={`roster-item ${selectedAgentId === agent.id ? "roster-item-active" : ""}`}
+                  key={agent.id}
+                  onClick={() => setSelectedAgentId(agent.id)}
+                >
+                  <div>
+                    <p className="agent-name">{agent.name}</p>
+                    <p className="agent-phase">{formatPhase(agent.phase)}</p>
+                    <p className="agent-home">{`${agent.kind === "plugin" ? "Plugin" : "Core"} | Base: ${ROLE_HUBS[agent.role].name}`}</p>
+                  </div>
+                  <div className="agent-meta">
+                    <p>Trust {agent.trustScore.toFixed(2)}</p>
+                    <p>Energy {(agent.energy * 100).toFixed(0)}%</p>
+                    <p>{agent.assignedJobId ? jobsById.get(agent.assignedJobId)?.title ?? "On job" : "Idle"}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
           </section>
 
           <section className="card manifest-card">
@@ -249,26 +297,6 @@ export default function App() {
             <p className="manifest-item">
               <span>Agent ID:</span> {onchainStatus?.identityAgentId ?? "pending"}
             </p>
-          </section>
-
-          <section className="card roster-card">
-            <h2>Agent Roster</h2>
-            <div className="roster-list">
-              {(snapshot?.agents ?? []).map((agent) => (
-                <div className="roster-item" key={agent.id}>
-                  <div>
-                    <p className="agent-name">{agent.name}</p>
-                    <p className="agent-phase">{formatPhase(agent.phase)}</p>
-                    <p className="agent-home">{`${agent.kind === "plugin" ? "Plugin" : "Core"} | Base: ${ROLE_HUBS[agent.role].name}`}</p>
-                  </div>
-                  <div className="agent-meta">
-                    <p>Trust {agent.trustScore.toFixed(2)}</p>
-                    <p>Energy {(agent.energy * 100).toFixed(0)}%</p>
-                    <p>{agent.assignedJobId ? jobsById.get(agent.assignedJobId)?.title ?? "On job" : "Idle"}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
           </section>
 
           <section className="card manifest-card">
@@ -329,25 +357,6 @@ export default function App() {
                 </p>
               ))}
             </div>
-          </section>
-
-          <section className="card manifest-card">
-            <h2>How It Works</h2>
-            <p className="manifest-item">
-              <span>Arrival Port:</span> jobs and plugin agents enter the city.
-            </p>
-            <p className="manifest-item">
-              <span>Planning Hall:</span> work is decomposed and matched to trusted specialists.
-            </p>
-            <p className="manifest-item">
-              <span>Guild District:</span> core and plugin builders execute real toolchains.
-            </p>
-            <p className="manifest-item">
-              <span>Audit Gate:</span> outputs are validated before settlement.
-            </p>
-            <p className="manifest-item">
-              <span>Receipt Tower:</span> verified jobs emit ERC-8004 receipts.
-            </p>
           </section>
         </aside>
       </main>

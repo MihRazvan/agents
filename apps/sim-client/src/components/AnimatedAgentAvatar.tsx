@@ -21,7 +21,7 @@ const PHASE_TO_CLIP: Record<string, string> = {
   blocked: "Idle"
 };
 
-function worldPoint(position: { x: number; y: number }, y = 0.72): [number, number, number] {
+function worldPoint(position: { x: number; y: number }, y = 0.92): [number, number, number] {
   return [position.x, y, position.y];
 }
 
@@ -29,9 +29,9 @@ export default function AnimatedAgentAvatar({ agent, job, chat }: Props) {
   const rootRef = useRef<THREE.Group>(null);
   const auraRef = useRef<THREE.Mesh>(null);
   const clipRef = useRef<string>("Idle");
-  const currentPosRef = useRef(new THREE.Vector3(agent.position.x, 0.72, agent.position.y));
-  const targetPosRef = useRef(new THREE.Vector3(agent.position.x, 0.72, agent.position.y));
-  const previousPosRef = useRef(new THREE.Vector3(agent.position.x, 0.72, agent.position.y));
+  const currentPosRef = useRef(new THREE.Vector3(agent.position.x, 0.92, agent.position.y));
+  const targetPosRef = useRef(new THREE.Vector3(agent.position.x, 0.92, agent.position.y));
+  const previousPosRef = useRef(new THREE.Vector3(agent.position.x, 0.92, agent.position.y));
   const speedRef = useRef(0);
 
   const { scene, animations } = useGLTF("/assets/characters/RobotExpressive.glb");
@@ -58,7 +58,7 @@ export default function AnimatedAgentAvatar({ agent, job, chat }: Props) {
   const color = AGENT_COLORS[agent.role];
 
   useEffect(() => {
-    targetPosRef.current.set(agent.position.x, 0.72, agent.position.y);
+    targetPosRef.current.set(agent.position.x, 0.92, agent.position.y);
   }, [agent.position.x, agent.position.y]);
 
   useEffect(() => {
@@ -107,7 +107,7 @@ export default function AnimatedAgentAvatar({ agent, job, chat }: Props) {
         : { x: targetPosRef.current.x, y: targetPosRef.current.z };
     const targetYaw = Math.atan2(lookAhead.x - currentPosRef.current.x, lookAhead.y - currentPosRef.current.z);
     rootRef.current.rotation.y = THREE.MathUtils.damp(rootRef.current.rotation.y, targetYaw + Math.PI, 7.5, delta);
-    rootRef.current.position.y = 0.72 + Math.sin(clock.getElapsedTime() * 4.8 + currentPosRef.current.x) * 0.03;
+    rootRef.current.position.y = 0.92 + Math.sin(clock.getElapsedTime() * 4.8 + currentPosRef.current.x) * 0.03;
 
     const active = actions[clipRef.current] ?? actions.Idle;
     if (active) {
@@ -125,15 +125,15 @@ export default function AnimatedAgentAvatar({ agent, job, chat }: Props) {
 
   return (
     <group ref={rootRef} position={worldPoint(agent.position)}>
-      <mesh ref={auraRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.58, 0]}>
-        <ringGeometry args={[0.42, 0.55, 32]} />
+      <mesh ref={auraRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.78, 0]}>
+        <ringGeometry args={[0.56, 0.76, 36]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.18} transparent opacity={0.35 + agent.trustScore * 0.2} />
       </mesh>
 
-      <primitive object={model} position={[0, -0.57, 0]} scale={[0.34, 0.34, 0.34]} />
+      <primitive object={model} position={[0, -0.8, 0]} scale={[0.48, 0.48, 0.48]} />
 
-      <mesh position={[0, 0.7, 0]}>
-        <sphereGeometry args={[0.08, 14, 14]} />
+      <mesh position={[0, 0.96, 0]}>
+        <sphereGeometry args={[0.1, 14, 14]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.15} />
       </mesh>
 
@@ -154,15 +154,15 @@ export default function AnimatedAgentAvatar({ agent, job, chat }: Props) {
         />
       ) : null}
 
-      <Text position={[0, 1.04, 0]} fontSize={0.15} color="#e8f1ff" anchorX="center" anchorY="bottom" maxWidth={4}>
+      <Text position={[0, 1.36, 0]} fontSize={0.19} color="#e8f1ff" anchorX="center" anchorY="bottom" maxWidth={4.8}>
         {agent.name}
       </Text>
-      <Text position={[0, 0.89, 0]} fontSize={0.09} color="#92b7e4" anchorX="center" anchorY="bottom" maxWidth={5.4}>
+      <Text position={[0, 1.15, 0]} fontSize={0.11} color="#92b7e4" anchorX="center" anchorY="bottom" maxWidth={6.2}>
         {agent.statusLine ?? agent.specialty}
       </Text>
 
       {chat ? (
-        <Html position={[0, 1.55, 0]} center distanceFactor={12}>
+        <Html position={[0, 2.05, 0]} center distanceFactor={10}>
           <div className={`world-tag world-tag-chat ${chat.tone === "warning" ? "world-tag-chat-warning" : "world-tag-chat-decision"}`}>
             <p>{chat.actorName}</p>
             <span>{chat.message}</span>
