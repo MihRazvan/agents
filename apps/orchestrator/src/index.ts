@@ -1447,6 +1447,7 @@ function mainLoop(): void {
       emitLocalReceipt("operator_link_validation", undefined, { operatorWallet, erc8004Identity });
     }
     seedPlugins();
+    spawnJob(jobQueue.find((job) => job.category === "github_bugfix"));
     spawnJob();
     spawnJob(jobQueue.find((job) => job.category === "move_contract"));
   }

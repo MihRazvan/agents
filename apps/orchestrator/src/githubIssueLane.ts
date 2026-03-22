@@ -73,6 +73,11 @@ function ensureArtifactState(rootDir: string, job: JobLike): GithubIssueLaneStat
   return state;
 }
 
+function resetWorkspace(state: GithubIssueLaneState, rootDir: string): void {
+  rmSync(state.workspaceDir, { recursive: true, force: true });
+  cpSync(fixtureDir(rootDir), state.workspaceDir, { recursive: true });
+}
+
 function fetchLiveIssue(job: JobLike): { payload: Record<string, unknown>; source: GithubIssueLaneState["source"]; issueTitle: string; issueNumber?: number; issueUrl?: string } {
   const owner = process.env.GITHUB_OWNER;
   const repo = process.env.GITHUB_REPO;
@@ -226,6 +231,7 @@ export function runGithubIssueStage(
     if (!existsSync(state.planFile)) {
       throw new Error("Plan artifact missing before execute stage");
     }
+    resetWorkspace(state, rootDir);
     applyWalletFix(state.workspaceDir);
     buildPatchDiff(state, rootDir);
     logger("Builder patched sandbox workspace and produced git diff", {
