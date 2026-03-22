@@ -136,6 +136,41 @@ export interface ChatMessage {
   message: string;
 }
 
+export type ReceiptAction =
+  | "identity_registry_registration"
+  | "operator_link_validation"
+  | "metadata_update"
+  | "reputation_registry_update"
+  | "validation_registry_write";
+
+export interface ReceiptRecord {
+  id: string;
+  action: ReceiptAction;
+  txHash: string;
+  timestamp: string;
+  mode: "onchain" | "simulated";
+  jobId?: string;
+  explorerUrl?: string;
+  context?: Record<string, unknown>;
+}
+
+export interface OnchainStatus {
+  enabled: boolean;
+  disabledReason?: string;
+  chainId: string;
+  network: string;
+  rpcUrl: string;
+  operatorWallet: string;
+  feedbackWallet?: string;
+  identityAgentId?: string;
+  identityTxHash?: string;
+  metadataTxHash?: string;
+  reputationEnabled: boolean;
+  validationEnabled: boolean;
+  reputationTxHashes: string[];
+  validationTxHashes: string[];
+}
+
 export interface WorldSnapshot {
   timestamp: string;
   tick: number;
@@ -148,7 +183,8 @@ export interface WorldSnapshot {
   };
   districts: District[];
   cinematicFocus?: string;
-  receipts: string[];
+  receipts: ReceiptRecord[];
+  onchainStatus: OnchainStatus;
   agents: AgentRuntimeState[];
   jobs: Job[];
   pluginAgents: PluginAgentRecord[];

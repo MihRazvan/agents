@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { JOB_ROUTING, ROLE_HUBS, type AgentManifest, type LogEntry, type PluginAgentRecord, type WorldSnapshot, type WsMessage } from "@trust-city/shared";
+import {
+  JOB_ROUTING,
+  ROLE_HUBS,
+  type AgentManifest,
+  type LogEntry,
+  type OnchainStatus,
+  type PluginAgentRecord,
+  type ReceiptRecord,
+  type WorldSnapshot,
+  type WsMessage
+} from "@trust-city/shared";
 import WorldScene from "./components/WorldScene";
 
 const httpBase = import.meta.env.VITE_ORCHESTRATOR_HTTP ?? "http://localhost:8787";
@@ -24,7 +34,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<WorldSnapshot | null>(null);
   const [manifest, setManifest] = useState<AgentManifest | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [receipts, setReceipts] = useState<string[]>([]);
+  const [receipts, setReceipts] = useState<ReceiptRecord[]>([]);
   const [plugins, setPlugins] = useState<PluginAgentRecord[]>([]);
   const [wsStatus, setWsStatus] = useState<"connecting" | "live" | "offline">("connecting");
 
@@ -82,10 +92,8 @@ export default function App() {
         }
 
         if (message.type === "receipt") {
-          const payload = message.payload as { txHash?: string };
-          if (payload.txHash) {
-            setReceipts((current) => [payload.txHash, ...current].filter((entry): entry is string => Boolean(entry)).slice(0, 10));
-          }
+          const payload = message.payload as ReceiptRecord;
+          setReceipts((current) => [payload, ...current.filter((entry) => entry.id !== payload.id)].slice(0, 10));
         }
 
         if (message.type === "plugin_registered") {
@@ -140,6 +148,8 @@ export default function App() {
       rejected: plugins.filter((plugin) => plugin.status === "rejected").length
     };
   }, [plugins]);
+
+  const onchainStatus: OnchainStatus | null = snapshot?.onchainStatus ?? null;
 
   return (
     <div className="app-shell">
@@ -204,6 +214,33 @@ export default function App() {
             </p>
           </section>
 
+          <section className="card manifest-card">
+            <h2>Onchain Status</h2>
+            <p className="manifest-item">
+              <span>Writes:</span> {onchainStatus?.enabled ? "Live on Sepolia" : "Simulated only"}
+            </p>
+            <p className="manifest-item">
+              <span>Reputation:</span> {onchainStatus?.reputationEnabled ? "Enabled" : "Disabled"}
+            </p>
+            <p className="manifest-item">
+              <span>Validation:</span> {onchainStatus?.validationEnabled ? "Enabled" : "Disabled"}
+            </p>
+            <p className="manifest-item">
+              <span>Chain:</span> {onchainStatus?.network ?? "ethereum-sepolia"} ({onchainStatus?.chainId ?? "11155111"})
+            </p>
+            <p className="manifest-item">
+              <span>Feedback Wallet:</span> {onchainStatus?.feedbackWallet ?? "not configured"}
+            </p>
+            {!onchainStatus?.enabled && onchainStatus?.disabledReason ? (
+              <p className="manifest-item">
+                <span>Reason:</span> {onchainStatus.disabledReason}
+              </p>
+            ) : null}
+            <p className="manifest-item">
+              <span>Agent ID:</span> {onchainStatus?.identityAgentId ?? "pending"}
+            </p>
+          </section>
+
           <section className="card roster-card">
             <h2>Agent Roster</h2>
             <div className="roster-list">
@@ -253,7 +290,22 @@ export default function App() {
             <h2>Onchain Receipts</h2>
             <div className="receipt-list">
               {receipts.map((receipt) => (
-                <p key={receipt}>{shortHash(receipt)}</p>
+                <div key={receipt.id} className="receipt-item">
+                  <p className={`receipt-mode receipt-mode-${receipt.mode}`}>{receipt.mode === "onchain" ? "live" : "sim"}</p>
+                  <div>
+                    <p className="receipt-action">{receipt.action.replace(/_/g, " ")}</p>
+                    <p className="receipt-hash">
+                      {receipt.explorerUrl ? (
+                        <a href={receipt.explorerUrl} target="_blank" rel="noreferrer">
+                          {shortHash(receipt.txHash)}
+                        </a>
+                      ) : (
+                        shortHash(receipt.txHash)
+                      )}
+                    </p>
+                    <p className="receipt-meta">{receipt.jobId ? jobsById.get(receipt.jobId)?.title ?? receipt.jobId : "system receipt"}</p>
+                  </div>
+                </div>
               ))}
             </div>
           </section>

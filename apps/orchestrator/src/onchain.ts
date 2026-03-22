@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { ethers } from "ethers";
 import { config as loadEnv } from "dotenv";
-import { type AgentManifest, type AgentRuntimeState, type Job } from "@trust-city/shared";
+import { type AgentManifest, type AgentRuntimeState, type Job, type OnchainStatus } from "@trust-city/shared";
 
 declare global {
   interface BigInt {
@@ -124,6 +124,9 @@ export class OnchainManager {
   private readonly sdk: InstanceType<typeof ChaosChainSDK> | null;
   private readonly feedbackWallet: ethers.Wallet | null;
   private readonly reputationContract: ethers.Contract | null;
+  private readonly rpcUrl: string;
+  private readonly networkLabel: string;
+  private readonly disabledReason?: string;
   private state: OnchainState | null = null;
   private initPromise: Promise<void> | null = null;
   private reputationWrites = new Set<string>();
@@ -131,6 +134,9 @@ export class OnchainManager {
   constructor(manifest: AgentManifest, callbacks: OnchainCallbacks) {
     this.manifest = manifest;
     this.callbacks = callbacks;
+    this.rpcUrl = configuredRpcUrl();
+    this.networkLabel = "ethereum-sepolia";
+    this.disabledReason = undefined;
 
     const privateKey = process.env.OPERATOR_PRIVATE_KEY;
     let enabled = boolFromEnv(process.env.ENABLE_ONCHAIN_WRITES, false) && Boolean(privateKey);
@@ -142,6 +148,7 @@ export class OnchainManager {
       this.sdk = null;
       this.feedbackWallet = null;
       this.reputationContract = null;
+      this.disabledReason = privateKey ? "ENABLE_ONCHAIN_WRITES is false." : "OPERATOR_PRIVATE_KEY is missing.";
       return;
     }
 
@@ -154,6 +161,7 @@ export class OnchainManager {
         derivedWallet
       });
       enabled = false;
+      this.disabledReason = "OPERATOR_WALLET does not match OPERATOR_PRIVATE_KEY.";
     }
 
     this.enabled = enabled;
@@ -171,6 +179,7 @@ export class OnchainManager {
     const network = NetworkConfig.ETHEREUM_SEPOLIA;
     const defaultContracts = getContractAddresses(network);
     const rpcUrl = configuredRpcUrl();
+    this.rpcUrl = rpcUrl;
     this.callbacks.onInfo("Configured ERC-8004 network", {
       network,
       contracts: defaultContracts,
@@ -388,5 +397,29 @@ export class OnchainManager {
         error: error instanceof Error ? error.message : String(error)
       });
     }
+  }
+
+  getStatus(): OnchainStatus {
+    const state = this.state ?? {
+      reputationTxHashes: [],
+      validationTxHashes: []
+    };
+
+    return {
+      enabled: this.enabled,
+      disabledReason: this.enabled ? undefined : this.disabledReason,
+      chainId: process.env.CHAIN_ID ?? "11155111",
+      network: this.networkLabel,
+      rpcUrl: this.rpcUrl,
+      operatorWallet: this.manifest.operatorWallet,
+      feedbackWallet: this.feedbackWallet?.address,
+      identityAgentId: state.operatorAgentId,
+      identityTxHash: state.identityTxHash,
+      metadataTxHash: state.metadataTxHash,
+      reputationEnabled: this.reputationEnabled,
+      validationEnabled: this.validationEnabled,
+      reputationTxHashes: state.reputationTxHashes,
+      validationTxHashes: state.validationTxHashes
+    };
   }
 }

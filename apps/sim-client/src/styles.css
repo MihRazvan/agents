@@ -260,6 +260,70 @@ body,
   border: 1px solid rgba(92, 255, 199, 0.22);
 }
 
+.receipt-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: start;
+  border-radius: 8px;
+  padding: 0.45rem;
+  background: rgba(10, 40, 35, 0.5);
+  border: 1px solid rgba(92, 255, 199, 0.22);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.receipt-item p {
+  margin: 0;
+}
+
+.receipt-mode {
+  min-width: 2.6rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.receipt-mode-onchain {
+  color: #beffe8;
+  background: rgba(20, 93, 67, 0.55);
+  border: 1px solid rgba(92, 255, 199, 0.3);
+}
+
+.receipt-mode-simulated {
+  color: #ffe6b1;
+  background: rgba(88, 59, 10, 0.5);
+  border: 1px solid rgba(255, 205, 111, 0.28);
+}
+
+.receipt-action {
+  color: #beffe8;
+  font-size: 0.68rem;
+}
+
+.receipt-hash {
+  margin-top: 0.18rem;
+  font-size: 0.72rem;
+}
+
+.receipt-hash a {
+  color: #ddfff3;
+  text-decoration: none;
+}
+
+.receipt-hash a:hover {
+  text-decoration: underline;
+}
+
+.receipt-meta {
+  margin-top: 0.18rem;
+  color: #9dd9c5;
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
 .feed-list p {
   background: rgba(15, 30, 49, 0.72);
   border: 1px solid rgba(120, 177, 236, 0.2);

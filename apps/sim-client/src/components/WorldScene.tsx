@@ -326,14 +326,20 @@ export default function WorldScene({ snapshot }: Props) {
         return <Line key={agentId} points={points} color={color} lineWidth={1.4} transparent opacity={0.35} />;
       })}
 
-      {(snapshot?.receipts ?? []).slice(-6).map((txHash, index) => (
-        <group key={txHash} position={[focusPoint.x + 28, 0.8 + index * 1.1, focusPoint.y - 14]}>
+      {(snapshot?.receipts ?? []).slice(-6).map((receipt, index) => (
+        <group key={receipt.id} position={[focusPoint.x + 28, 0.8 + index * 1.1, focusPoint.y - 14]}>
           <mesh>
             <torusGeometry args={[0.3, 0.08, 9, 22]} />
-            <meshStandardMaterial color="#56ffd9" emissive="#56ffd9" emissiveIntensity={1.35} metalness={0.2} roughness={0.15} />
+            <meshStandardMaterial
+              color={receipt.mode === "onchain" ? "#56ffd9" : "#ffd56c"}
+              emissive={receipt.mode === "onchain" ? "#56ffd9" : "#ffd56c"}
+              emissiveIntensity={1.35}
+              metalness={0.2}
+              roughness={0.15}
+            />
           </mesh>
           <Text position={[0.9, 0, 0]} fontSize={0.12} color="#d7fffa" anchorX="left" anchorY="middle">
-            {txHash.slice(0, 10)}
+            {receipt.txHash.slice(0, 10)}
           </Text>
         </group>
       ))}

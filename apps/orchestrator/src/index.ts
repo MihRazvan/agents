@@ -24,6 +24,8 @@ import {
   type JobCategory,
   type LogEntry,
   type PluginAgentRecord,
+  type ReceiptAction,
+  type ReceiptRecord,
   type Vec2,
   type WorldSnapshot,
   type WsMessage
@@ -88,6 +90,7 @@ interface JobWorkflow {
   stage: number;
   activeAgentId?: string;
   startedAtTick: number;
+  lastWaitLogTick?: number;
 }
 
 interface JobTemplate {
@@ -139,7 +142,7 @@ const pluginAgents: PluginAgentRecord[] = [];
 const workflows = new Map<string, JobWorkflow>();
 const logs: LogEntry[] = [];
 const chats: ChatMessage[] = [];
-const receipts: string[] = [];
+const receipts: ReceiptRecord[] = [];
 
 let tick = 0;
 let loopStartedAt = Date.now();
@@ -377,27 +380,49 @@ function addChat(actorId: string, actorName: string, message: string, tone: Chat
   trimChats();
 }
 
-function recordReceipt(action: string, txHash: string, jobId?: string, extra?: Record<string, unknown>): string {
-  receipts.push(txHash);
+function receiptExplorerUrl(txHash: string): string {
+  return `https://sepolia.etherscan.io/tx/${txHash}`;
+}
+
+function recordReceipt(
+  action: ReceiptAction,
+  txHash: string,
+  jobId?: string,
+  extra?: Record<string, unknown>,
+  mode: ReceiptRecord["mode"] = "onchain"
+): ReceiptRecord {
+  const receipt: ReceiptRecord = {
+    id: randomUUID(),
+    action,
+    txHash,
+    jobId,
+    timestamp: nowIso(),
+    mode,
+    explorerUrl: mode === "onchain" ? receiptExplorerUrl(txHash) : undefined,
+    context: extra
+  };
+
+  receipts.push(receipt);
   if (receipts.length > 100) {
     receipts.splice(0, receipts.length - 100);
   }
   addLog("onchain", "erc8004-writer", `Onchain ${action} receipt committed`, {
     txHash,
     jobId,
+    mode,
     ...extra
   });
-  broadcast({ type: "receipt", payload: { txHash, action, jobId, timestamp: nowIso(), ...extra } });
-  return txHash;
+  broadcast({ type: "receipt", payload: receipt });
+  return receipt;
 }
 
-function emitLocalReceipt(action: string, jobId?: string, extra?: Record<string, unknown>): string {
-  return recordReceipt(action, makeTxHash(), jobId, extra);
+function emitLocalReceipt(action: ReceiptAction, jobId?: string, extra?: Record<string, unknown>): ReceiptRecord {
+  return recordReceipt(action, makeTxHash(), jobId, extra, "simulated");
 }
 
 const onchain = new OnchainManager(manifest, {
   onReceipt: (action, txHash, context) => {
-    recordReceipt(action, txHash, typeof context?.jobId === "string" ? context.jobId : undefined, context);
+    recordReceipt(action as ReceiptAction, txHash, typeof context?.jobId === "string" ? context.jobId : undefined, context, "onchain");
   },
   onInfo: (message, context) => {
     addLog("state", "erc8004-writer", message, context);
@@ -416,6 +441,7 @@ function getSnapshot(): WorldSnapshot {
     districts,
     cinematicFocus,
     receipts,
+    onchainStatus: onchain.getStatus(),
     agents,
     jobs,
     pluginAgents,
@@ -563,12 +589,32 @@ function scoreAgentForJob(agent: AgentRuntimeState, job: Job): number {
   return agent.trustScore * 4 + skillMatches * 1.1 + toolMatches * 0.7 + categoryMatch + pluginBonus;
 }
 
+function stageTrustThreshold(role: AgentRole, job: Job): number {
+  if (role === "scout") {
+    return TRUST_THRESHOLD;
+  }
+
+  if (role === "planner") {
+    return Math.max(TRUST_THRESHOLD, job.requiredTrust - 0.08);
+  }
+
+  if (role === "verifier") {
+    return Math.max(0.78, job.requiredTrust);
+  }
+
+  if (role === "publisher") {
+    return Math.max(TRUST_THRESHOLD, job.requiredTrust - 0.02);
+  }
+
+  return job.requiredTrust;
+}
+
 function supportsJobStage(agent: AgentRuntimeState, role: AgentRole, job: Job): boolean {
   if (agent.role !== role) {
     return false;
   }
 
-  const threshold = Math.max(TRUST_THRESHOLD, role === "builder" || role === "verifier" || role === "publisher" ? job.requiredTrust : TRUST_THRESHOLD);
+  const threshold = stageTrustThreshold(role, job);
   if (agent.trustScore < threshold) {
     return false;
   }
@@ -591,18 +637,29 @@ function findEligibleAgents(role: AgentRole, job: Job): AgentRuntimeState[] {
     .sort((a, b) => scoreAgentForJob(b, job) - scoreAgentForJob(a, job));
 }
 
+function findCapableAgents(role: AgentRole, job: Job): AgentRuntimeState[] {
+  return agents
+    .filter((agent) => supportsJobStage(agent, role, job))
+    .sort((a, b) => scoreAgentForJob(b, job) - scoreAgentForJob(a, job));
+}
+
 function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState | null {
   const step = stageByIndex[workflow.stage];
   const candidates = findEligibleAgents(step.role, job);
   const candidate = candidates[0] ?? null;
 
   if (!candidate) {
+    const capableAgents = findCapableAgents(step.role, job);
+    if (capableAgents.length > 0) {
+      return null;
+    }
+
     cinematicFocus = job.id;
     addLog("safety", "policy-engine", "Trust gate blocked job handoff", {
       jobId: job.id,
       requiredRole: step.role,
       category: job.category,
-      threshold: Math.max(TRUST_THRESHOLD, job.requiredTrust)
+      threshold: stageTrustThreshold(step.role, job)
     });
     addChat("policy-engine", "Policy Engine", `${JOB_ROUTING[job.category].label} paused. No eligible ${step.role} cleared trust and capability checks.`, "warning");
     return null;
@@ -901,6 +958,21 @@ function processJobs(): void {
     if (!workflow.activeAgentId) {
       const assigned = allocateStageAgent(job, workflow);
       if (!assigned) {
+        const step = stageByIndex[workflow.stage];
+        const capableAgents = findCapableAgents(step.role, job);
+        if (capableAgents.length > 0) {
+          job.status = workflow.stage < 2 ? "queued" : job.status;
+          if (!workflow.lastWaitLogTick || tick - workflow.lastWaitLogTick >= 24) {
+            workflow.lastWaitLogTick = tick;
+            addLog("state", "policy-engine", "Job waiting for qualified agent to become available", {
+              jobId: job.id,
+              requiredRole: step.role,
+              candidates: capableAgents.map((agent) => agent.name)
+            });
+          }
+          continue;
+        }
+
         job.retries += 1;
         if (job.retries > budget.maxRetriesPerJob) {
           job.status = "failed";
@@ -1107,6 +1179,13 @@ app.get("/agent_log.json", (_req, res) => {
 
 app.get("/plugins", (_req, res) => {
   res.json(pluginAgents);
+});
+
+app.get("/onchain", (_req, res) => {
+  res.json({
+    status: onchain.getStatus(),
+    receipts
+  });
 });
 
 app.post("/plugins", (req, res) => {
