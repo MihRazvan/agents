@@ -12,6 +12,7 @@ import {
   type WsMessage
 } from "@trust-city/shared";
 import SubmitJobCard from "./components/SubmitJobCard";
+import PlugInAgentCard from "./components/PlugInAgentCard";
 import WorldScene from "./components/WorldScene";
 
 const httpBase = import.meta.env.VITE_ORCHESTRATOR_HTTP ?? "http://localhost:8787";
@@ -268,6 +269,7 @@ export default function App() {
           </section>
 
           <SubmitJobCard httpBase={httpBase} />
+          <PlugInAgentCard httpBase={httpBase} />
 
           <button type="button" className="advanced-toggle" onClick={() => setAdvancedOpen((current) => !current)}>
             {advancedOpen ? "Hide Advanced" : "Show Advanced"}

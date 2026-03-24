@@ -185,6 +185,22 @@ body,
   font-family: "IBM Plex Mono", monospace;
 }
 
+.section-toggle {
+  appearance: none;
+  border: 1px solid rgba(132, 214, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(10, 22, 40, 0.78);
+  color: #d6ebff;
+  padding: 0.34rem 0.62rem;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.section-toggle:hover {
+  border-color: rgba(132, 214, 255, 0.44);
+}
+
 .metric-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -262,6 +278,29 @@ body,
   font-size: 0.68rem;
   line-height: 1.45;
   font-family: "IBM Plex Mono", monospace;
+}
+
+.checkbox-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.38rem;
+}
+
+.checkbox-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid rgba(132, 214, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(10, 22, 40, 0.78);
+  color: #d6ebff;
+  padding: 0.36rem 0.58rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+}
+
+.checkbox-pill input {
+  margin: 0;
 }
 
 .job-submit-button {
