@@ -18,6 +18,7 @@ import WorldScene from "./components/WorldScene";
 
 const httpBase = import.meta.env.VITE_ORCHESTRATOR_HTTP ?? "http://localhost:8787";
 const wsBase = import.meta.env.VITE_ORCHESTRATOR_WS ?? httpBase.replace("http://", "ws://").replace("https://", "wss://") + "/ws";
+const ONBOARDING_STORAGE_KEY = "trust-city-onboarding-dismissed";
 
 function formatPhase(phase: string): string {
   return phase.replace(/_/g, " ");
@@ -68,6 +69,9 @@ export default function App() {
   const [followAgentId, setFollowAgentId] = useState<string | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [demoLaunchState, setDemoLaunchState] = useState<"idle" | "submitting" | "success" | "error">("idle");
+  const [demoLaunchMessage, setDemoLaunchMessage] = useState<string>("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -93,6 +97,15 @@ export default function App() {
 
     void loadBootData();
     return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const dismissed = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
+    setGuideOpen(dismissed !== "1");
   }, []);
 
   useEffect(() => {
@@ -207,6 +220,64 @@ export default function App() {
     setFollowAgentId(agentId);
   }
 
+  function dismissGuide(): void {
+    setGuideOpen(false);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "1");
+    }
+  }
+
+  async function launchDemoJob(): Promise<void> {
+    setDemoLaunchState("submitting");
+    setDemoLaunchMessage("Sending a GitHub bugfix into the city...");
+
+    try {
+      const response = await fetch(`${httpBase}/jobs`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          title: "Patch wallet connect regression",
+          summary: "Investigate the wallet connection regression, generate a patch, run tests, and publish delivery artifacts.",
+          category: "github_bugfix",
+          source: "github",
+          submitter: "Demo Console",
+          requestedSkills: ["TypeScript", "debugging", "tests"],
+          requiredTools: ["github_api", "git", "test_runner"],
+          requiredTrust: 0.74,
+          deliverable: "Patch artifact with test evidence",
+          referenceUrl: "https://github.com/example/repo/issues/184",
+          deliveryTarget: "Patch bundle and verification log"
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Request failed");
+      }
+
+      const payload = (await response.json()) as { id?: string; title?: string };
+      setDemoLaunchState("success");
+      setDemoLaunchMessage(payload.title ? `${payload.title} is now live in Open Jobs.` : "Demo job launched into the city.");
+    } catch {
+      setDemoLaunchState("error");
+      setDemoLaunchMessage("Demo launch failed. The city may still be starting up.");
+    }
+  }
+
+  function followActiveAgent(): void {
+    const activeAgent =
+      (snapshot?.agents ?? []).find((agent) => agent.assignedJobId && agent.phase !== "idle") ??
+      (snapshot?.agents ?? []).find((agent) => agent.phase !== "idle") ??
+      snapshot?.agents[0];
+
+    if (!activeAgent) {
+      return;
+    }
+
+    focusAgent(activeAgent.id);
+  }
+
   function formatChatHeader(chat: ChatMessage): string {
     return chat.recipientName ? `${chat.actorName} -> ${chat.recipientName}` : chat.actorName;
   }
@@ -250,9 +321,15 @@ export default function App() {
         <div className="workspace-brand">
           <p className="workspace-kicker">City Operations</p>
           <h1>Trust City</h1>
-          <p className="workspace-copy">Autonomous work routing, live agent coordination, and trust-aware delivery in one operator view.</p>
+          <p className="workspace-copy">A live marketplace where autonomous agents pick up jobs, collaborate, verify output, and deliver with trust signals and receipts.</p>
         </div>
         <div className="workspace-summary">
+          <button type="button" className="workspace-action" onClick={() => setGuideOpen(true)}>
+            How it works
+          </button>
+          <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
+            {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo job"}
+          </button>
           <div className={`status status-${wsStatus}`}>
             <span className="dot" />
             <span>{wsStatus === "live" ? "Connection Live" : wsStatus === "connecting" ? "Connecting" : "Offline"}</span>
@@ -284,8 +361,8 @@ export default function App() {
             </div>
             <div className="scene-chat-overlay">
               <div className="scene-chat-head">
-                <h2>Live Chat</h2>
-                <p>{followAgentId ? `Following ${selectedAgent?.name ?? "agent"}` : "Auto-follow armed"}</p>
+                <h2>Live Handoffs</h2>
+                <p>{followAgentId ? `Following ${selectedAgent?.name ?? "agent"}` : "Agent-to-agent decisions and delivery updates"}</p>
               </div>
               <div className="scene-chat-list">
                 {recentChats.slice(0, 8).map((chat) => (
@@ -300,6 +377,52 @@ export default function App() {
         </section>
 
         <aside className="side-panel">
+          <section className="card guide-card">
+            <div className="section-head">
+              <h2>Start Here</h2>
+              <p className="section-note">For first-time judges and users</p>
+            </div>
+            <div className="guide-grid">
+              <article className="guide-step">
+                <p className="guide-step-index">1</p>
+                <div>
+                  <h3>Send work into the city</h3>
+                  <p>Launch a demo GitHub bugfix or submit your own job below. New work appears immediately in Open Jobs.</p>
+                </div>
+              </article>
+              <article className="guide-step">
+                <p className="guide-step-index">2</p>
+                <div>
+                  <h3>Watch agents coordinate</h3>
+                  <p>The 3D scene shows agents physically moving between hubs while Live Handoffs explains the decisions.</p>
+                </div>
+              </article>
+              <article className="guide-step">
+                <p className="guide-step-index">3</p>
+                <div>
+                  <h3>Track status and receipts</h3>
+                  <p>Open Jobs shows each stage, Job History shows outcomes, and System Details exposes the onchain receipts.</p>
+                </div>
+              </article>
+            </div>
+            <div className="guide-actions">
+              <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
+                {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo GitHub fix"}
+              </button>
+              <button type="button" className="workspace-action" onClick={followActiveAgent}>
+                Follow an active agent
+              </button>
+              <button type="button" className="workspace-action" onClick={() => setAdvancedOpen(true)}>
+                Open receipts and logs
+              </button>
+            </div>
+            {demoLaunchMessage ? (
+              <p className={`guide-status guide-status-${demoLaunchState === "error" ? "error" : demoLaunchState === "success" ? "success" : "neutral"}`}>
+                {demoLaunchMessage}
+              </p>
+            ) : null}
+          </section>
+
           <section className="card board-card">
             <div className="section-head">
               <h2>Open Jobs</h2>
@@ -490,6 +613,44 @@ export default function App() {
           ) : null}
         </aside>
       </main>
+
+      {guideOpen ? (
+        <div className="guide-modal-shell" role="presentation">
+          <div className="guide-modal-backdrop" onClick={dismissGuide} />
+          <section className="guide-modal" role="dialog" aria-modal="true" aria-labelledby="guide-modal-title">
+            <p className="workspace-kicker">Welcome to Trust City</p>
+            <h2 id="guide-modal-title">What you’re looking at</h2>
+            <p className="guide-modal-copy">
+              Trust City is a live marketplace for autonomous agent work. Jobs enter the city, specialized agents discover them, plan execution, collaborate,
+              verify the result, and deliver with trust-aware routing and ERC-8004 receipts.
+            </p>
+
+            <div className="guide-modal-grid">
+              <article className="guide-modal-panel">
+                <h3>Purpose</h3>
+                <p>Show that autonomous agents can operate like independent workers, not just chatbots, inside a visible trust-gated marketplace.</p>
+              </article>
+              <article className="guide-modal-panel">
+                <h3>What to watch</h3>
+                <p>Open Jobs for stage-by-stage progress, Live Handoffs for reasoning, Agent Roster for who is executing, and System Details for receipts.</p>
+              </article>
+              <article className="guide-modal-panel">
+                <h3>Best demo path</h3>
+                <p>Run the GitHub bugfix demo. You’ll see a job routed through planner, builder, verifier, publisher, then finalized with artifacts and receipts.</p>
+              </article>
+            </div>
+
+            <div className="guide-modal-actions">
+              <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()}>
+                Run demo job
+              </button>
+              <button type="button" className="workspace-action" onClick={dismissGuide}>
+                Enter city
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
