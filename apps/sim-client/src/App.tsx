@@ -69,9 +69,12 @@ export default function App() {
   const [followAgentId, setFollowAgentId] = useState<string | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [startHereOpen, setStartHereOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [demoLaunchState, setDemoLaunchState] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [demoLaunchMessage, setDemoLaunchMessage] = useState<string>("");
+  const [spotlightMode, setSpotlightMode] = useState(false);
+  const [jobsTab, setJobsTab] = useState<"open" | "history">("open");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -166,6 +169,15 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!spotlightMode) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => setSpotlightMode(false), 14000);
+    return () => window.clearTimeout(timeout);
+  }, [spotlightMode]);
+
   const jobStats = useMemo(() => {
     if (!snapshot) {
       return { live: 0, completed: 0, failed: 0 };
@@ -230,6 +242,7 @@ export default function App() {
   async function launchDemoJob(): Promise<void> {
     setDemoLaunchState("submitting");
     setDemoLaunchMessage("Sending a GitHub bugfix into the city...");
+    setSpotlightMode(false);
 
     try {
       const response = await fetch(`${httpBase}/jobs`, {
@@ -258,7 +271,14 @@ export default function App() {
 
       const payload = (await response.json()) as { id?: string; title?: string };
       setDemoLaunchState("success");
-      setDemoLaunchMessage(payload.title ? `${payload.title} is now live in Open Jobs.` : "Demo job launched into the city.");
+      setDemoLaunchMessage(
+        payload.title
+          ? `${payload.title} is live. Watch Open Jobs, Live Handoffs, and Onchain Receipts.`
+          : "Demo job launched. Watch Open Jobs, Live Handoffs, and Onchain Receipts."
+      );
+      setAdvancedOpen(true);
+      setSpotlightMode(true);
+      dismissGuide();
     } catch {
       setDemoLaunchState("error");
       setDemoLaunchMessage("Demo launch failed. The city may still be starting up.");
@@ -321,35 +341,24 @@ export default function App() {
         <div className="workspace-brand">
           <p className="workspace-kicker">City Operations</p>
           <h1>Trust City</h1>
-          <p className="workspace-copy">A live marketplace where autonomous agents pick up jobs, collaborate, verify output, and deliver with trust signals and receipts.</p>
+          <p className="workspace-copy">A live marketplace where specialized agents discover jobs, coordinate execution, verify outcomes, and deliver with trust-aware routing and onchain receipts.</p>
         </div>
         <div className="workspace-summary">
-          <button type="button" className="workspace-action" onClick={() => setGuideOpen(true)}>
-            How it works
-          </button>
-          <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
-            {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo job"}
-          </button>
-          <div className={`status status-${wsStatus}`}>
-            <span className="dot" />
-            <span>{wsStatus === "live" ? "Connection Live" : wsStatus === "connecting" ? "Connecting" : "Offline"}</span>
-          </div>
-          <div className="summary-chip">
-            <span>Open</span>
-            <strong>{jobStats.live}</strong>
-          </div>
-          <div className="summary-chip">
-            <span>Closed</span>
-            <strong>{jobStats.completed}</strong>
-          </div>
-          <div className="summary-chip">
-            <span>Agents</span>
-            <strong>{snapshot?.agents.length ?? 0}</strong>
-          </div>
-          <div className="summary-chip">
-            <span>Plugins</span>
-            <strong>{pluginCounts.active}</strong>
-          </div>
+          <article className="proof-card">
+            <p className="proof-kicker">Autonomous loop</p>
+            <h2>Discover → plan → execute → verify → submit</h2>
+            <p>Each job moves through a full agent workflow instead of a single chatbot response.</p>
+          </article>
+          <article className="proof-card">
+            <p className="proof-kicker">Trust layer</p>
+            <h2>ERC-8004 identity and receipts</h2>
+            <p>Agents carry operator-linked identity, reputation updates, and visible receipt trails.</p>
+          </article>
+          <article className="proof-card">
+            <p className="proof-kicker">Open marketplace</p>
+            <h2>Submit jobs or plug in agents</h2>
+            <p>Users can send work into the city, and third-party agents can join the market and win jobs.</p>
+          </article>
         </div>
       </header>
 
@@ -359,11 +368,12 @@ export default function App() {
             <div className="scene-canvas-shell">
               <WorldScene snapshot={snapshot} selectedAgentId={selectedAgentId} followAgentId={followAgentId} focusNonce={focusNonce} />
             </div>
-            <div className="scene-chat-overlay">
+            <div className={`scene-chat-overlay ${spotlightMode ? "spotlight-panel" : ""}`}>
               <div className="scene-chat-head">
                 <h2>Live Handoffs</h2>
-                <p>{followAgentId ? `Following ${selectedAgent?.name ?? "agent"}` : "Agent-to-agent decisions and delivery updates"}</p>
+                <p>{spotlightMode ? "Watch routing decisions and handoffs happen live." : followAgentId ? `Following ${selectedAgent?.name ?? "agent"}` : "Agent-to-agent decisions and delivery updates"}</p>
               </div>
+              {spotlightMode ? <p className="spotlight-hint">Look here: this is the running commentary for what the agents are deciding.</p> : null}
               <div className="scene-chat-list">
                 {recentChats.slice(0, 8).map((chat) => (
                   <div key={chat.id} className={`scene-chat-item scene-chat-item-${chat.tone}`}>
@@ -380,42 +390,64 @@ export default function App() {
           <section className="card guide-card">
             <div className="section-head">
               <h2>Start Here</h2>
-              <p className="section-note">For first-time judges and users</p>
-            </div>
-            <div className="guide-grid">
-              <article className="guide-step">
-                <p className="guide-step-index">1</p>
-                <div>
-                  <h3>Send work into the city</h3>
-                  <p>Launch a demo GitHub bugfix or submit your own job below. New work appears immediately in Open Jobs.</p>
-                </div>
-              </article>
-              <article className="guide-step">
-                <p className="guide-step-index">2</p>
-                <div>
-                  <h3>Watch agents coordinate</h3>
-                  <p>The 3D scene shows agents physically moving between hubs while Live Handoffs explains the decisions.</p>
-                </div>
-              </article>
-              <article className="guide-step">
-                <p className="guide-step-index">3</p>
-                <div>
-                  <h3>Track status and receipts</h3>
-                  <p>Open Jobs shows each stage, Job History shows outcomes, and System Details exposes the onchain receipts.</p>
-                </div>
-              </article>
-            </div>
-            <div className="guide-actions">
-              <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
-                {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo GitHub fix"}
-              </button>
-              <button type="button" className="workspace-action" onClick={followActiveAgent}>
-                Follow an active agent
-              </button>
-              <button type="button" className="workspace-action" onClick={() => setAdvancedOpen(true)}>
-                Open receipts and logs
+              <p className="section-note">Quick platform tour</p>
+              <button type="button" className="section-toggle" onClick={() => setStartHereOpen((current) => !current)}>
+                {startHereOpen ? "Hide" : "Open"}
               </button>
             </div>
+            {startHereOpen ? (
+              <>
+                <div className="guide-grid">
+                  <article className="guide-step">
+                    <p className="guide-step-index">1</p>
+                    <div>
+                      <h3>Send work into the city</h3>
+                      <p>Launch a demo GitHub bugfix or submit your own job below. New work appears immediately in Open Jobs and begins routing through the market.</p>
+                    </div>
+                  </article>
+                  <article className="guide-step">
+                    <p className="guide-step-index">2</p>
+                    <div>
+                      <h3>Watch agents coordinate</h3>
+                      <p>The 3D scene shows agents physically moving between hubs while Live Handoffs explains each delegation, retry, and delivery decision.</p>
+                    </div>
+                  </article>
+                  <article className="guide-step">
+                    <p className="guide-step-index">3</p>
+                    <div>
+                      <h3>Track status and receipts</h3>
+                      <p>Open Jobs shows each stage, Job History shows finished outcomes, and System Details exposes receipts, logs, and operator context.</p>
+                    </div>
+                  </article>
+                </div>
+                <div className="guide-actions">
+                  <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
+                    {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo GitHub fix"}
+                  </button>
+                  <button type="button" className="workspace-action" onClick={followActiveAgent}>
+                    Follow an active agent
+                  </button>
+                  <button type="button" className="workspace-action" onClick={() => setAdvancedOpen(true)}>
+                    Open receipts and logs
+                  </button>
+                  <button type="button" className="workspace-action" onClick={() => setGuideOpen(true)}>
+                    Open overview
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="guide-preview">
+                <p>Launch a demo job, watch agents route it through the city, and inspect receipts once delivery is complete.</p>
+                <div className="guide-actions">
+                  <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
+                    {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo GitHub fix"}
+                  </button>
+                  <button type="button" className="workspace-action" onClick={() => setGuideOpen(true)}>
+                    Open overview
+                  </button>
+                </div>
+              </div>
+            )}
             {demoLaunchMessage ? (
               <p className={`guide-status guide-status-${demoLaunchState === "error" ? "error" : demoLaunchState === "success" ? "success" : "neutral"}`}>
                 {demoLaunchMessage}
@@ -423,27 +455,50 @@ export default function App() {
             ) : null}
           </section>
 
-          <section className="card board-card">
+          <section className={`card board-card ${spotlightMode ? "spotlight-panel" : ""}`}>
             <div className="section-head">
-              <h2>Open Jobs</h2>
-              <p className="section-note">
-                {openJobs.length > 0 ? `${openJobs.length} active in the city` : "No active jobs right now"}
-              </p>
+              <h2>Jobs</h2>
+              <div className="section-tabs" role="tablist" aria-label="Jobs">
+                <button
+                  type="button"
+                  className={`section-tab ${jobsTab === "open" ? "section-tab-active" : ""}`}
+                  onClick={() => setJobsTab("open")}
+                  role="tab"
+                  aria-selected={jobsTab === "open"}
+                >
+                  Open
+                </button>
+                <button
+                  type="button"
+                  className={`section-tab ${jobsTab === "history" ? "section-tab-active" : ""}`}
+                  onClick={() => setJobsTab("history")}
+                  role="tab"
+                  aria-selected={jobsTab === "history"}
+                >
+                  History
+                </button>
+              </div>
             </div>
+            <p className="section-note">
+              {jobsTab === "open"
+                ? spotlightMode
+                  ? "New demo work appears here first"
+                  : openJobs.length > 0
+                    ? `${openJobs.length} active in the city`
+                    : "No active jobs right now"
+                : jobHistory.length > 0
+                  ? "Most recent completed and failed work"
+                  : "Completed jobs will accumulate here"}
+            </p>
+            {spotlightMode && jobsTab === "open" ? <p className="spotlight-hint">Look here first: jobs progress from queued to verifying as agents take ownership.</p> : null}
             <div className="job-board-list">
-              {openJobs.length > 0 ? openJobs.map((job) => renderJobCard(job, "open")) : <p className="empty-state">New work will appear here as soon as it enters the city.</p>}
-            </div>
-          </section>
-
-          <section className="card board-card">
-            <div className="section-head">
-              <h2>Job History</h2>
-              <p className="section-note">
-                {jobHistory.length > 0 ? "Most recent completed and failed work" : "Completed jobs will accumulate here"}
-              </p>
-            </div>
-            <div className="job-board-list">
-              {jobHistory.length > 0 ? jobHistory.map((job) => renderJobCard(job, "history")) : <p className="empty-state">No finished jobs yet.</p>}
+              {jobsTab === "open"
+                ? openJobs.length > 0
+                  ? openJobs.map((job) => renderJobCard(job, "open"))
+                  : <p className="empty-state">New work will appear here as soon as it enters the city.</p>
+                : jobHistory.length > 0
+                  ? jobHistory.map((job) => renderJobCard(job, "history"))
+                  : <p className="empty-state">No finished jobs yet.</p>}
             </div>
           </section>
 
@@ -575,8 +630,9 @@ export default function App() {
                 <p className="budget-line">POST {httpBase}/plugins to plug your agent into the city.</p>
               </section>
 
-              <section className="card receipt-card">
+              <section className={`card receipt-card ${spotlightMode ? "spotlight-panel" : ""}`}>
                 <h2>Onchain Receipts</h2>
+                {spotlightMode ? <p className="spotlight-hint">Look here last: this is where the trust layer leaves a verifiable trail.</p> : null}
                 <div className="receipt-list">
                   {receipts.map((receipt) => (
                     <div key={receipt.id} className="receipt-item">
