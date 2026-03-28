@@ -212,6 +212,7 @@ function createCoreAgent(config: {
     phase: "idle",
     trustScore: config.trustScore,
     position: home,
+    homePosition: home,
     target: home,
     path: [],
     energy: 1,
@@ -241,6 +242,7 @@ function crowdConfigFor(agent: Pick<AgentRuntimeState, "speed" | "kind" | "role"
 function registerAgentMotion(agent: AgentRuntimeState): void {
   const safePosition = navigation.registerCrowdAgent(agent.id, agent.position, crowdConfigFor(agent));
   agent.position = safePosition;
+  agent.homePosition = navigation.ensureWalkable(agent.homePosition);
   agent.target = safePosition;
   agent.path = [];
 }
@@ -254,6 +256,7 @@ const agents: AgentRuntimeState[] = [
     speed: 1.2,
     specialty: "Job intake and source classification",
     homeDistrictId: "district-registry",
+    offset: { x: -3.2, y: 1.8 },
     capabilities: capabilityProfile(["intake", "classification", "source-triage"], allCategories(), ["job_feed", "registry_reader"])
   }),
   createCoreAgent({
@@ -264,6 +267,7 @@ const agents: AgentRuntimeState[] = [
     speed: 1.04,
     specialty: "Task decomposition and routing strategy",
     homeDistrictId: "district-atlas",
+    offset: { x: -3.8, y: 2.4 },
     capabilities: capabilityProfile(
       ["decomposition", "capability-matching", "dependency-mapping"],
       allCategories(),
@@ -278,6 +282,7 @@ const agents: AgentRuntimeState[] = [
     speed: 0.96,
     specialty: "React, repo patches, and shipping previews",
     homeDistrictId: "district-guild",
+    offset: { x: 3.2, y: 2.2 },
     capabilities: capabilityProfile(
       ["react", "typescript", "repo-fixes", "deployments"],
       ["microsite_build", "github_bugfix", "contract_audit"],
@@ -308,6 +313,7 @@ const agents: AgentRuntimeState[] = [
     speed: 0.98,
     specialty: "Quality gates, trust checks, and evidence review",
     homeDistrictId: "district-registry",
+    offset: { x: 2.8, y: -2.4 },
     capabilities: capabilityProfile(
       ["testing", "audit", "verification"],
       allCategories(),
@@ -322,6 +328,7 @@ const agents: AgentRuntimeState[] = [
     speed: 1.08,
     specialty: "Artifact packaging and ERC-8004 receipt publishing",
     homeDistrictId: "district-commons",
+    offset: { x: -2.6, y: 2.2 },
     capabilities: capabilityProfile(
       ["publishing", "submission", "receipt-writing"],
       allCategories(),
@@ -681,7 +688,7 @@ function setAgentIdle(agentId?: string): void {
   agent.phase = "idle";
   agent.assignedJobId = undefined;
   agent.statusLine = `Ready at ${ROLE_HUBS[agent.role].name}`;
-  setAgentDestination(agent, hubPoint(agent.role));
+  setAgentDestination(agent, agent.homePosition);
 }
 
 function riskLevelForJob(job: Pick<Job, "priority" | "requiredTrust" | "category">): Job["riskLevel"] {
@@ -1434,6 +1441,7 @@ function registerPluginAgent(request: PluginRegistrationRequest): PluginAgentRec
       phase: "idle",
       trustScore: record.trustScore,
       position: spawnPoint,
+      homePosition: spawnPoint,
       target: spawnPoint,
       path: [],
       energy: 1,

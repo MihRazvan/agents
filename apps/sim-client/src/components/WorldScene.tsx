@@ -27,6 +27,10 @@ const FOLLOW_TARGET_LAG = 5.4;
 const FOLLOW_CAMERA_LAG = 2.2;
 const FOLLOW_COLLISION_BUFFER = 2.2;
 const FOLLOW_MIN_DISTANCE = 5.8;
+const IDLE_CAMERA_RADIUS = 34;
+const IDLE_CAMERA_HEIGHT = 18;
+const IDLE_ORBIT_SPEED = 0.08;
+const IDLE_TARGET_HEIGHT = 3.4;
 const MIDNIGHT_BACKGROUND = "#050811";
 const MIDNIGHT_FOG = "#08101b";
 
@@ -212,7 +216,7 @@ function CameraDirector({
   const targetRef = useRef(new THREE.Vector3(0, 1.2, 1));
   const cameraRef = useRef(new THREE.Vector3(24, 20, 24));
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     const controls = controlsRef.current;
     if (!snapshot || !controls) {
       return;
@@ -237,8 +241,17 @@ function CameraDirector({
     }
 
     const focus = getFocusPoint(snapshot, selectedAgentId);
-    targetRef.current.set(focus.x, 1.35, focus.y);
-    controls.target.lerp(targetRef.current, Math.min(1, delta * 1.85));
+    const t = state.clock.getElapsedTime() * IDLE_ORBIT_SPEED;
+    const desiredTarget = new THREE.Vector3(focus.x, IDLE_TARGET_HEIGHT, focus.y);
+    const desiredCamera = new THREE.Vector3(
+      focus.x + Math.cos(t) * IDLE_CAMERA_RADIUS,
+      IDLE_CAMERA_HEIGHT + Math.sin(t * 0.7) * 2.2,
+      focus.y + Math.sin(t) * (IDLE_CAMERA_RADIUS * 0.74)
+    );
+    targetRef.current.lerp(desiredTarget, Math.min(1, delta * 1.45));
+    cameraRef.current.lerp(desiredCamera, Math.min(1, delta * 0.62));
+    controls.object.position.copy(cameraRef.current);
+    controls.target.copy(targetRef.current);
     controls.update();
   });
 
@@ -549,7 +562,7 @@ export default function WorldScene({ snapshot, selectedAgentId, followAgentId, f
       gl={{ antialias: true, powerPreference: "high-performance" }}
     >
       <color attach="background" args={[MIDNIGHT_BACKGROUND]} />
-      <fog attach="fog" args={[MIDNIGHT_FOG, 52, 290]} />
+      <fog attach="fog" args={[MIDNIGHT_FOG, 72, 360]} />
 
       <ambientLight intensity={0.22} color="#7ca9ff" />
       <hemisphereLight args={["#7eb7ff", "#061018", 0.58]} />

@@ -35,6 +35,7 @@ export interface AgentRuntimeState {
   kind: AgentKind;
   phase: AgentPhase;
   position: Vec2;
+  homePosition: Vec2;
   target: Vec2;
   path: Vec2[];
   trustScore: number;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   JOB_ROUTING,
   ROLE_HUBS,
@@ -75,6 +75,8 @@ export default function App() {
   const [demoLaunchMessage, setDemoLaunchMessage] = useState<string>("");
   const [spotlightMode, setSpotlightMode] = useState(false);
   const [jobsTab, setJobsTab] = useState<"open" | "history">("open");
+  const [showLaunchSplash, setShowLaunchSplash] = useState(true);
+  const launchStartedAtRef = useRef(performance.now());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -168,6 +170,20 @@ export default function App() {
     const timeout = window.setTimeout(() => setSpotlightMode(false), 14000);
     return () => window.clearTimeout(timeout);
   }, [spotlightMode]);
+
+  useEffect(() => {
+    if (!showLaunchSplash) {
+      return;
+    }
+
+    const minimumDisplayMs = 2400;
+    const elapsed = performance.now() - launchStartedAtRef.current;
+    const timer = window.setTimeout(() => {
+      setShowLaunchSplash(false);
+    }, Math.max(180, minimumDisplayMs - elapsed));
+
+    return () => window.clearTimeout(timer);
+  }, [showLaunchSplash]);
 
   const jobStats = useMemo(() => {
     if (!snapshot) {
@@ -588,7 +604,7 @@ export default function App() {
         </aside>
       </main>
 
-      {guideOpen ? (
+      {!showLaunchSplash && guideOpen ? (
         <div className="guide-modal-shell" role="presentation">
           <div className="guide-modal-backdrop" onClick={dismissGuide} />
           <section className="guide-modal" role="dialog" aria-modal="true" aria-labelledby="guide-modal-title">
@@ -624,7 +640,10 @@ export default function App() {
               <button type="button" className="workspace-action" onClick={() => setAdvancedOpen(true)}>
                 Open receipts and logs
               </button>
-              <button type="button" className="workspace-action" onClick={dismissGuide}>
+            </div>
+
+            <div className="guide-modal-enter">
+              <button type="button" className="workspace-action workspace-action-enter" onClick={dismissGuide}>
                 Enter city
               </button>
             </div>
@@ -646,6 +665,24 @@ export default function App() {
           <div className="guide-modal-backdrop" onClick={() => setPlugInAgentOpen(false)} />
           <div className="action-modal-shell">
             <PlugInAgentCard httpBase={httpBase} onClose={() => setPlugInAgentOpen(false)} />
+          </div>
+        </div>
+      ) : null}
+
+      {showLaunchSplash ? (
+        <div className="launch-splash" role="presentation" aria-hidden={snapshot ? "true" : undefined}>
+          <div className="launch-splash-backdrop" />
+          <div className="launch-splash-panel">
+            <p className="workspace-kicker">Midnight Exchange</p>
+            <h1>Trust City</h1>
+            <p className="launch-splash-copy">Loading the city, syncing world state, and opening the market.</p>
+            <div className="launch-splash-progress" aria-hidden="true">
+              <span className="launch-splash-progress-bar" />
+            </div>
+            <div className="launch-splash-status">
+              <span className={`launch-splash-pill launch-splash-pill-${wsStatus}`}>{wsStatus === "live" ? "relay live" : wsStatus}</span>
+              <span>{snapshot ? "rendering city" : "syncing world state"}</span>
+            </div>
           </div>
         </div>
       ) : null}

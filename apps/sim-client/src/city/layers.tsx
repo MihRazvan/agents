@@ -1,5 +1,5 @@
 import { useMemo, useRef } from "react";
-import { Float, Html, Line } from "@react-three/drei";
+import { Float, Html, Line, useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { AGENT_COLORS, DISTRICT_THEME_PURPOSE, JOB_ROUTING, ROLE_HUBS, type Job, type PluginAgentRecord, type Vec2, type WorldSnapshot } from "@trust-city/shared";
@@ -15,7 +15,170 @@ function glowMaterial(color: THREE.ColorRepresentation, intensity: number, opaci
   return <meshStandardMaterial color={color} emissive={color} emissiveIntensity={intensity} transparent={opacity < 1} opacity={opacity} />;
 }
 
+function structureVariantSeed(structure: CityStructure): number {
+  return Math.abs(Math.round(structure.x * 17 + structure.z * 31 + structure.height * 13));
+}
+
+function chooseBySeed<T>(items: T[], seed: number): T {
+  return items[seed % items.length];
+}
+
+function pickKenneyAsset(structure: CityStructure): string | null {
+  if (structure.kind === "park") {
+    return null;
+  }
+
+  const seed = structureVariantSeed(structure);
+
+  if (structure.kind === "tree") {
+    return "/assets/kenney/suburban/tree-large.glb";
+  }
+
+  if (structure.kind === "house") {
+    return chooseBySeed(
+      [
+        "/assets/kenney/suburban/building-type-a.glb",
+        "/assets/kenney/suburban/building-type-j.glb",
+        "/assets/kenney/suburban/building-type-q.glb"
+      ],
+      seed
+    );
+  }
+
+  if (structure.kind === "warehouse") {
+    return chooseBySeed(
+      [
+        "/assets/kenney/industrial/building-a.glb",
+        "/assets/kenney/industrial/building-q.glb",
+        "/assets/kenney/industrial/building-r.glb"
+      ],
+      seed
+    );
+  }
+
+  if (structure.kind === "institution") {
+    if (structure.districtTheme === "industrial") {
+      return chooseBySeed(["/assets/kenney/industrial/building-q.glb", "/assets/kenney/industrial/building-r.glb"], seed);
+    }
+    if (structure.districtTheme === "residential") {
+      return chooseBySeed(["/assets/kenney/suburban/building-type-j.glb", "/assets/kenney/suburban/building-type-q.glb"], seed);
+    }
+    return chooseBySeed(["/assets/kenney/commercial/building-a.glb", "/assets/kenney/commercial/building-f.glb"], seed);
+  }
+
+  if (structure.kind === "midrise") {
+    if (structure.districtTheme === "industrial") {
+      return chooseBySeed(["/assets/kenney/industrial/building-a.glb", "/assets/kenney/industrial/building-q.glb"], seed);
+    }
+    if (structure.districtTheme === "residential") {
+      return chooseBySeed(["/assets/kenney/suburban/building-type-a.glb", "/assets/kenney/suburban/building-type-j.glb"], seed);
+    }
+    return chooseBySeed(["/assets/kenney/commercial/building-a.glb", "/assets/kenney/commercial/building-f.glb"], seed);
+  }
+
+  if (structure.kind === "tower") {
+    return chooseBySeed(
+      [
+        "/assets/kenney/commercial/building-skyscraper-a.glb",
+        "/assets/kenney/commercial/building-skyscraper-c.glb",
+        "/assets/kenney/commercial/building-skyscraper-e.glb"
+      ],
+      seed
+    );
+  }
+
+  return null;
+}
+
+function KenneyStructure({ structure, path }: { structure: CityStructure; path: string }) {
+  const { scene } = useGLTF(path);
+  const prepared = useMemo(() => {
+    const next = scene.clone(true);
+    next.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = structure.lod === "near";
+        child.receiveShadow = true;
+      }
+    });
+    return next;
+  }, [scene, structure.lod]);
+
+  const bbox = useMemo(() => new THREE.Box3().setFromObject(scene), [scene]);
+  const size = useMemo(() => bbox.getSize(new THREE.Vector3()), [bbox]);
+  const center = useMemo(() => bbox.getCenter(new THREE.Vector3()), [bbox]);
+  const seeded = structureVariantSeed(structure);
+  const rotationY = ((seeded % 4) * Math.PI) / 2;
+
+  const scale = useMemo(() => {
+    const safeX = Math.max(size.x, 0.001);
+    const safeY = Math.max(size.y, 0.001);
+    const safeZ = Math.max(size.z, 0.001);
+    const footprintMultiplier =
+      structure.kind === "tower"
+        ? 2.35
+        : structure.kind === "midrise"
+          ? 2.7
+          : structure.kind === "warehouse"
+            ? 2.9
+            : structure.kind === "institution"
+              ? 2.6
+              : structure.kind === "house"
+                ? 3.25
+                : structure.kind === "tree"
+                  ? 3.4
+                  : 2.6;
+    const heightMultiplier =
+      structure.kind === "tower"
+        ? 2.7
+        : structure.kind === "midrise"
+          ? 2.8
+          : structure.kind === "warehouse"
+            ? 2.6
+            : structure.kind === "institution"
+              ? 2.6
+              : structure.kind === "house"
+                ? 3.0
+                : structure.kind === "tree"
+                  ? 3.2
+                  : 2.6;
+    const widthScale = (structure.width * footprintMultiplier) / safeX;
+    const depthScale = (structure.depth * footprintMultiplier) / safeZ;
+    const heightScale = (structure.height * heightMultiplier) / safeY;
+    return Math.min(widthScale, depthScale, heightScale);
+  }, [size.x, size.y, size.z, structure.width, structure.depth, structure.height, structure.kind]);
+
+  return (
+    <group position={[structure.x, 0, structure.z]} rotation={[0, rotationY, 0]}>
+      <primitive object={prepared} position={[-center.x * scale, -bbox.min.y * scale, -center.z * scale]} scale={[scale, scale, scale]} />
+    </group>
+  );
+}
+
+const PRELOAD_KENNEY_PATHS = [
+  "/assets/kenney/commercial/building-a.glb",
+  "/assets/kenney/commercial/building-f.glb",
+  "/assets/kenney/commercial/building-skyscraper-a.glb",
+  "/assets/kenney/commercial/building-skyscraper-c.glb",
+  "/assets/kenney/commercial/building-skyscraper-e.glb",
+  "/assets/kenney/industrial/building-a.glb",
+  "/assets/kenney/industrial/building-q.glb",
+  "/assets/kenney/industrial/building-r.glb",
+  "/assets/kenney/suburban/building-type-a.glb",
+  "/assets/kenney/suburban/building-type-j.glb",
+  "/assets/kenney/suburban/building-type-q.glb",
+  "/assets/kenney/suburban/tree-large.glb"
+];
+
+for (const path of PRELOAD_KENNEY_PATHS) {
+  useGLTF.preload(path);
+}
+
 export function StructureBlock({ structure }: { structure: CityStructure }) {
+  const kenneyPath = structure.lod === "near" ? pickKenneyAsset(structure) : null;
+  if (kenneyPath) {
+    return <KenneyStructure structure={structure} path={kenneyPath} />;
+  }
+
   const saturation = structure.kind === "park" || structure.kind === "tree" ? 38 : structure.lod === "near" ? 36 : 26;
   const lightness = structure.kind === "park" || structure.kind === "tree" ? 22 : structure.lod === "near" ? 16 : 11;
   const color = new THREE.Color(`hsl(${structure.hue}, ${saturation}%, ${lightness}%)`);

@@ -1,4 +1,4 @@
-import type { District, Vec2 } from "@trust-city/shared";
+import { ROLE_HUBS, type District, type Vec2 } from "@trust-city/shared";
 
 export type StructureKind = "tower" | "midrise" | "house" | "warehouse" | "institution" | "park" | "tree";
 
@@ -39,6 +39,30 @@ const ROAD_MINOR_HALF_WIDTH = 1.7;
 const NEAR_CHUNK_RADIUS = 2;
 const FAR_CHUNK_RADIUS = 4;
 const BUILDING_SETBACK = 0.95;
+const HUB_CLEARANCE_RADIUS = 8.5;
+
+function distanceSq(a: Vec2, b: Vec2): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
+function isProtectedZone(position: Vec2, districts: District[]): boolean {
+  for (const hub of Object.values(ROLE_HUBS)) {
+    if (distanceSq(position, hub.position) <= HUB_CLEARANCE_RADIUS * HUB_CLEARANCE_RADIUS) {
+      return true;
+    }
+  }
+
+  for (const district of districts) {
+    const protectedRadius = Math.max(6.2, district.radius * 0.48);
+    if (distanceSq(position, district.center) <= protectedRadius * protectedRadius) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 function hashNumber(seed: number, x: number, y: number): number {
   let value = (seed ^ (x * 374761393) ^ (y * 668265263)) >>> 0;
@@ -174,12 +198,13 @@ function buildChunkStructures(seed: number, cx: number, cz: number, lod: "near" 
     for (let lx = 0; lx < lotsPerSide; lx += 1) {
       const x = chunkMinX + lx * LOT_SIZE + LOT_SIZE / 2;
       const z = chunkMinZ + lz * LOT_SIZE + LOT_SIZE / 2;
+      const position = { x, y: z };
 
-      if (roadTypeAt(x, BUILDING_SETBACK) !== "none" || roadTypeAt(z, BUILDING_SETBACK) !== "none") {
+      if (roadTypeAt(x, BUILDING_SETBACK) !== "none" || roadTypeAt(z, BUILDING_SETBACK) !== "none" || isProtectedZone(position, districts)) {
         continue;
       }
 
-      const theme = nearestDistrictTheme({ x, y: z }, districts);
+      const theme = nearestDistrictTheme(position, districts);
       const occupancyRoll = hashNumber(seed + 5, cx * 53 + lx * 11, cz * 71 + lz * 17);
       const selectionRoll = hashNumber(seed + 17, cx * 83 + lx * 31, cz * 37 + lz * 13);
       const greeneryRoll = hashNumber(seed + 31, cx * 29 + lx * 7, cz * 97 + lz * 19);

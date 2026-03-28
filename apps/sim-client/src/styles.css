@@ -98,6 +98,18 @@ body,
   color: #f5fbff;
 }
 
+.workspace-action-enter {
+  min-width: 11.5rem;
+  border-color: rgba(188, 226, 255, 0.52);
+  background:
+    linear-gradient(135deg, rgba(205, 232, 255, 0.16), rgba(95, 150, 219, 0.24)),
+    linear-gradient(180deg, rgba(23, 34, 48, 0.96), rgba(15, 23, 33, 0.98));
+  color: #f5fbff;
+  box-shadow:
+    0 0 0 1px rgba(188, 226, 255, 0.12),
+    0 14px 34px rgba(0, 0, 0, 0.28);
+}
+
 .scene-column {
   display: block;
   min-height: 0;
@@ -1121,55 +1133,100 @@ button.roster-item {
   margin-top: 0.9rem;
 }
 
+.guide-modal-enter {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.95rem;
+}
+
 .world-tag {
-  min-width: 138px;
-  max-width: 230px;
-  border: 1px solid rgba(132, 214, 255, 0.32);
-  border-radius: 8px;
-  background: rgba(8, 20, 36, 0.72);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
-  backdrop-filter: blur(4px);
-  color: #dff1ff;
+  position: relative;
+  min-width: 148px;
+  max-width: 248px;
+  overflow: hidden;
+  border: 1px solid rgba(138, 216, 255, 0.3);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(10, 20, 34, 0.9), rgba(7, 14, 26, 0.92)),
+    linear-gradient(135deg, rgba(85, 190, 255, 0.06), transparent 48%);
+  box-shadow:
+    inset 0 1px 0 rgba(204, 233, 255, 0.06),
+    0 8px 18px rgba(0, 0, 0, 0.28),
+    0 0 24px rgba(46, 121, 173, 0.12);
+  backdrop-filter: blur(8px);
+  color: #e7f4ff;
   font-family: "IBM Plex Mono", monospace;
-  padding: 0.24rem 0.36rem;
+  padding: 0.34rem 0.48rem 0.32rem;
   line-height: 1.25;
+  pointer-events: none;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.32);
+}
+
+.world-tag::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0.4rem;
+  right: 0.4rem;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(173, 229, 255, 0.7), transparent);
+}
+
+.world-tag::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
   pointer-events: none;
 }
 
 .world-tag p {
   margin: 0;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .world-tag span {
   display: block;
-  margin-top: 0.12rem;
-  font-size: 0.62rem;
-  color: #a8c6e6;
+  margin-top: 0.16rem;
+  font-size: 0.65rem;
+  color: #afc8e1;
+  line-height: 1.35;
 }
 
 .world-tag-hub {
   min-width: unset;
   max-width: 180px;
-  border-color: rgba(160, 224, 255, 0.34);
+  border-color: rgba(160, 224, 255, 0.4);
+  background:
+    linear-gradient(180deg, rgba(10, 20, 34, 0.92), rgba(8, 14, 24, 0.94)),
+    linear-gradient(135deg, rgba(152, 214, 255, 0.08), transparent 48%);
 }
 
 .world-tag-district {
   min-width: 150px;
-  border-color: rgba(138, 232, 186, 0.28);
-  background: rgba(9, 22, 27, 0.58);
+  border-color: rgba(138, 232, 186, 0.34);
+  background:
+    linear-gradient(180deg, rgba(10, 22, 27, 0.9), rgba(8, 18, 20, 0.92)),
+    linear-gradient(135deg, rgba(138, 232, 186, 0.07), transparent 44%);
 }
 
 .world-tag-district-active {
   border-color: rgba(138, 232, 186, 0.55);
-  background: rgba(10, 31, 28, 0.82);
+  background:
+    linear-gradient(180deg, rgba(10, 31, 28, 0.94), rgba(7, 22, 20, 0.96)),
+    linear-gradient(135deg, rgba(138, 232, 186, 0.09), transparent 44%);
 }
 
 .world-tag-job {
   min-width: 180px;
   max-width: 260px;
-  border-color: rgba(255, 196, 117, 0.42);
-  background: rgba(28, 18, 9, 0.8);
+  border-color: rgba(255, 196, 117, 0.46);
+  background:
+    linear-gradient(180deg, rgba(28, 18, 9, 0.92), rgba(18, 11, 6, 0.94)),
+    linear-gradient(135deg, rgba(255, 196, 117, 0.08), transparent 42%);
 }
 
 .world-tag-plugin {
@@ -1180,7 +1237,9 @@ button.roster-item {
   min-width: 240px;
   max-width: 360px;
   border-width: 1px;
-  background: rgba(7, 18, 31, 0.96);
+  background:
+    linear-gradient(180deg, rgba(7, 18, 31, 0.98), rgba(5, 12, 22, 0.98)),
+    linear-gradient(135deg, rgba(120, 210, 255, 0.06), transparent 48%);
 }
 
 .world-tag-chat-decision {
@@ -1194,6 +1253,122 @@ button.roster-item {
 .world-tag-spine {
   min-width: unset;
   max-width: unset;
+}
+
+.launch-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+}
+
+.launch-splash-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(76, 145, 214, 0.1), transparent 20%),
+    linear-gradient(180deg, rgba(5, 8, 13, 0.985), rgba(6, 10, 15, 0.995));
+}
+
+.launch-splash-panel {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0.8rem;
+  width: min(560px, calc(100vw - 2rem));
+  padding: 1.4rem 1.5rem;
+}
+
+.launch-splash-panel h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 6vw, 3.8rem);
+  line-height: 0.98;
+  letter-spacing: -0.08em;
+}
+
+.launch-splash-copy {
+  margin: 0;
+  max-width: 32rem;
+  color: #c5d5e6;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.launch-splash-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: #d7e5f5;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.launch-splash-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 7.5rem;
+  padding: 0.28rem 0.54rem;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 160, 180, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.launch-splash-pill-live {
+  border-color: rgba(104, 208, 165, 0.28);
+  color: #dffff2;
+  background: rgba(104, 208, 165, 0.1);
+}
+
+.launch-splash-pill-connecting {
+  border-color: rgba(127, 180, 255, 0.28);
+  color: #e1efff;
+  background: rgba(127, 180, 255, 0.1);
+}
+
+.launch-splash-pill-offline {
+  border-color: rgba(234, 139, 139, 0.28);
+  color: #ffd9d9;
+  background: rgba(234, 139, 139, 0.1);
+}
+
+.launch-splash-progress {
+  position: relative;
+  width: min(400px, calc(100vw - 4rem));
+  height: 0.36rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(160, 178, 201, 0.08);
+}
+
+.launch-splash-progress-bar {
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(112, 187, 255, 0.14), rgba(112, 187, 255, 0.96), rgba(255, 196, 122, 0.72));
+  box-shadow: 0 0 24px rgba(112, 187, 255, 0.28);
+  animation: load-sweep 1.15s ease-in-out infinite;
+}
+
+@keyframes load-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  50% {
+    transform: translateX(78%);
+  }
+
+  100% {
+    transform: translateX(170%);
+  }
 }
 
 @media (max-width: 1200px) {
