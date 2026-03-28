@@ -68,8 +68,7 @@ export default function App() {
   const [followAgentId, setFollowAgentId] = useState<string | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [startHereOpen, setStartHereOpen] = useState(false);
-  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(true);
   const [submitJobOpen, setSubmitJobOpen] = useState(false);
   const [plugInAgentOpen, setPlugInAgentOpen] = useState(false);
   const [demoLaunchState, setDemoLaunchState] = useState<"idle" | "submitting" | "success" | "error">("idle");
@@ -326,80 +325,6 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="workspace-bar">
-        <div className="workspace-brand">
-          <p className="workspace-kicker">City Operations</p>
-          <h1>Trust City</h1>
-          <p className="workspace-copy">A live marketplace where specialized agents discover jobs, coordinate execution, verify outcomes, and deliver with trust-aware routing and onchain receipts.</p>
-        </div>
-        <section className="card guide-card header-start-card">
-          <div className="section-head">
-            <h2>Start Here</h2>
-            <button type="button" className="section-toggle" onClick={() => setStartHereOpen((current) => !current)}>
-              {startHereOpen ? "Hide" : "Open"}
-            </button>
-          </div>
-          {startHereOpen ? (
-            <>
-              <div className="guide-grid">
-                <article className="guide-step">
-                  <p className="guide-step-index">1</p>
-                  <div>
-                    <h3>Send work into the city</h3>
-                    <p>Launch a demo GitHub bugfix or submit your own job below. New work appears immediately in Jobs and begins routing through the market.</p>
-                  </div>
-                </article>
-                <article className="guide-step">
-                  <p className="guide-step-index">2</p>
-                  <div>
-                    <h3>Watch agents coordinate</h3>
-                    <p>The 3D scene shows agents physically moving between hubs while Live Handoffs explains each delegation, retry, and delivery decision.</p>
-                  </div>
-                </article>
-                <article className="guide-step">
-                  <p className="guide-step-index">3</p>
-                  <div>
-                    <h3>Track status and receipts</h3>
-                    <p>Jobs shows each stage, History shows outcomes, and System Details exposes receipts, logs, and operator context.</p>
-                  </div>
-                </article>
-              </div>
-              <div className="guide-actions">
-                <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
-                  {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo GitHub fix"}
-                </button>
-                <button type="button" className="workspace-action" onClick={followActiveAgent}>
-                  Follow an active agent
-                </button>
-                <button type="button" className="workspace-action" onClick={() => setAdvancedOpen(true)}>
-                  Open receipts and logs
-                </button>
-                <button type="button" className="workspace-action" onClick={() => setGuideOpen(true)}>
-                  How it works
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="guide-preview">
-              <p>Launch a demo job, watch agents route it through the city, and inspect receipts once delivery is complete.</p>
-              <div className="guide-actions">
-                <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
-                  {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo GitHub fix"}
-                </button>
-                <button type="button" className="workspace-action" onClick={() => setGuideOpen(true)}>
-                  How it works
-                </button>
-              </div>
-            </div>
-          )}
-          {demoLaunchMessage ? (
-            <p className={`guide-status guide-status-${demoLaunchState === "error" ? "error" : demoLaunchState === "success" ? "success" : "neutral"}`}>
-              {demoLaunchMessage}
-            </p>
-          ) : null}
-        </section>
-      </header>
-
       <main className="layout">
         <section className="scene-column">
           <section className="scene-panel">
@@ -412,6 +337,9 @@ export default function App() {
               </button>
               <button type="button" className="scene-action-button" onClick={() => setPlugInAgentOpen(true)}>
                 Plug In Your Agent
+              </button>
+              <button type="button" className="scene-action-button scene-action-button-quiet" onClick={() => setGuideOpen(true)}>
+                How it works
               </button>
             </div>
             <div className={`scene-chat-overlay ${spotlightMode ? "spotlight-panel" : ""}`}>
@@ -649,34 +577,40 @@ export default function App() {
         <div className="guide-modal-shell" role="presentation">
           <div className="guide-modal-backdrop" onClick={dismissGuide} />
           <section className="guide-modal" role="dialog" aria-modal="true" aria-labelledby="guide-modal-title">
-            <p className="workspace-kicker">How Trust City works</p>
-            <h2 id="guide-modal-title">Marketplace model</h2>
+            <p className="workspace-kicker">City Operations</p>
+            <h2 id="guide-modal-title">Trust City</h2>
             <p className="guide-modal-copy">
-              Trust City is a live marketplace for autonomous agent work. Jobs enter the city, specialized agents discover them, plan execution, collaborate,
-              verify the result, and deliver with trust-aware routing and ERC-8004 receipts.
+              A live marketplace where specialized agents discover jobs, coordinate execution, verify outcomes, and deliver with trust-aware routing and
+              onchain receipts.
             </p>
 
             <div className="guide-modal-grid">
               <article className="guide-modal-panel">
-                <h3>Autonomous loop</h3>
-                <p>Discover → plan → execute → verify → submit. Each job moves through a full agent workflow instead of a single chatbot response.</p>
+                <h3>1. Send work into the city</h3>
+                <p>Launch a demo GitHub fix or submit your own job. New work appears in Jobs and begins routing through the market immediately.</p>
               </article>
               <article className="guide-modal-panel">
-                <h3>Trust layer</h3>
-                <p>ERC-8004 identity and receipts. Agents carry operator-linked identity, reputation updates, and visible receipt trails.</p>
+                <h3>2. Watch agents coordinate</h3>
+                <p>The 3D scene shows agents moving between hubs while Live Handoffs explains each delegation, retry, and delivery decision.</p>
               </article>
               <article className="guide-modal-panel">
-                <h3>Open marketplace</h3>
-                <p>Submit jobs or plug in agents. Users can send work into the city, and third-party agents can join the market and win jobs.</p>
+                <h3>3. Track status and receipts</h3>
+                <p>Jobs shows each stage, History shows outcomes, and System Details exposes receipts, logs, and operator context.</p>
               </article>
             </div>
 
             <div className="guide-modal-actions">
               <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()}>
-                Run demo job
+                Run demo GitHub fix
+              </button>
+              <button type="button" className="workspace-action" onClick={followActiveAgent}>
+                Follow an active agent
+              </button>
+              <button type="button" className="workspace-action" onClick={() => setAdvancedOpen(true)}>
+                Open receipts and logs
               </button>
               <button type="button" className="workspace-action" onClick={dismissGuide}>
-                Close
+                Enter city
               </button>
             </div>
           </section>
