@@ -361,6 +361,17 @@ export default function App() {
         </section>
 
         <aside className="side-panel">
+          <section className="rail-header" aria-label="Operations rail overview">
+            <div>
+              <p className="workspace-kicker">Operations Rail</p>
+              <p className="rail-header-title">Live city state</p>
+            </div>
+            <div className="rail-header-meta">
+              <span>{openJobs.length} open</span>
+              <span>{(snapshot?.agents ?? []).length} agents</span>
+            </div>
+          </section>
+
           <section className={`card board-card ${spotlightMode ? "spotlight-panel" : ""}`}>
             <div className="section-head">
               <h2>Jobs</h2>
@@ -442,7 +453,11 @@ export default function App() {
           </button>
 
           {advancedOpen ? (
-            <>
+            <section className="system-group" aria-label="System details">
+              <div className="system-group-head">
+                <p className="workspace-kicker">Secondary Surfaces</p>
+                <p className="system-group-copy">Receipts, logs, operator context, and runtime state.</p>
+              </div>
               <section className="card metrics-card">
                 <h2>Runtime Metrics</h2>
                 <div className="metric-row">
@@ -568,7 +583,7 @@ export default function App() {
                   ))}
                 </div>
               </section>
-            </>
+            </section>
           ) : null}
         </aside>
       </main>
