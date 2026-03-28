@@ -18,7 +18,6 @@ import WorldScene from "./components/WorldScene";
 
 const httpBase = import.meta.env.VITE_ORCHESTRATOR_HTTP ?? "http://localhost:8787";
 const wsBase = import.meta.env.VITE_ORCHESTRATOR_WS ?? httpBase.replace("http://", "ws://").replace("https://", "wss://") + "/ws";
-const ONBOARDING_STORAGE_KEY = "trust-city-onboarding-dismissed";
 
 function formatPhase(phase: string): string {
   return phase.replace(/_/g, " ");
@@ -100,15 +99,6 @@ export default function App() {
 
     void loadBootData();
     return () => controller.abort();
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const dismissed = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
-    setGuideOpen(dismissed !== "1");
   }, []);
 
   useEffect(() => {
@@ -234,9 +224,6 @@ export default function App() {
 
   function dismissGuide(): void {
     setGuideOpen(false);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "1");
-    }
   }
 
   async function launchDemoJob(): Promise<void> {
@@ -343,23 +330,72 @@ export default function App() {
           <h1>Trust City</h1>
           <p className="workspace-copy">A live marketplace where specialized agents discover jobs, coordinate execution, verify outcomes, and deliver with trust-aware routing and onchain receipts.</p>
         </div>
-        <div className="workspace-summary">
-          <article className="proof-card">
-            <p className="proof-kicker">Autonomous loop</p>
-            <h2>Discover → plan → execute → verify → submit</h2>
-            <p>Each job moves through a full agent workflow instead of a single chatbot response.</p>
-          </article>
-          <article className="proof-card">
-            <p className="proof-kicker">Trust layer</p>
-            <h2>ERC-8004 identity and receipts</h2>
-            <p>Agents carry operator-linked identity, reputation updates, and visible receipt trails.</p>
-          </article>
-          <article className="proof-card">
-            <p className="proof-kicker">Open marketplace</p>
-            <h2>Submit jobs or plug in agents</h2>
-            <p>Users can send work into the city, and third-party agents can join the market and win jobs.</p>
-          </article>
-        </div>
+        <section className="card guide-card header-start-card">
+          <div className="section-head">
+            <h2>Start Here</h2>
+            <button type="button" className="section-toggle" onClick={() => setStartHereOpen((current) => !current)}>
+              {startHereOpen ? "Hide" : "Open"}
+            </button>
+          </div>
+          {startHereOpen ? (
+            <>
+              <div className="guide-grid">
+                <article className="guide-step">
+                  <p className="guide-step-index">1</p>
+                  <div>
+                    <h3>Send work into the city</h3>
+                    <p>Launch a demo GitHub bugfix or submit your own job below. New work appears immediately in Jobs and begins routing through the market.</p>
+                  </div>
+                </article>
+                <article className="guide-step">
+                  <p className="guide-step-index">2</p>
+                  <div>
+                    <h3>Watch agents coordinate</h3>
+                    <p>The 3D scene shows agents physically moving between hubs while Live Handoffs explains each delegation, retry, and delivery decision.</p>
+                  </div>
+                </article>
+                <article className="guide-step">
+                  <p className="guide-step-index">3</p>
+                  <div>
+                    <h3>Track status and receipts</h3>
+                    <p>Jobs shows each stage, History shows outcomes, and System Details exposes receipts, logs, and operator context.</p>
+                  </div>
+                </article>
+              </div>
+              <div className="guide-actions">
+                <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
+                  {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo GitHub fix"}
+                </button>
+                <button type="button" className="workspace-action" onClick={followActiveAgent}>
+                  Follow an active agent
+                </button>
+                <button type="button" className="workspace-action" onClick={() => setAdvancedOpen(true)}>
+                  Open receipts and logs
+                </button>
+                <button type="button" className="workspace-action" onClick={() => setGuideOpen(true)}>
+                  How it works
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="guide-preview">
+              <p>Launch a demo job, watch agents route it through the city, and inspect receipts once delivery is complete.</p>
+              <div className="guide-actions">
+                <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
+                  {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo GitHub fix"}
+                </button>
+                <button type="button" className="workspace-action" onClick={() => setGuideOpen(true)}>
+                  How it works
+                </button>
+              </div>
+            </div>
+          )}
+          {demoLaunchMessage ? (
+            <p className={`guide-status guide-status-${demoLaunchState === "error" ? "error" : demoLaunchState === "success" ? "success" : "neutral"}`}>
+              {demoLaunchMessage}
+            </p>
+          ) : null}
+        </section>
       </header>
 
       <main className="layout">
@@ -387,74 +423,6 @@ export default function App() {
         </section>
 
         <aside className="side-panel">
-          <section className="card guide-card">
-            <div className="section-head">
-              <h2>Start Here</h2>
-              <p className="section-note">Quick platform tour</p>
-              <button type="button" className="section-toggle" onClick={() => setStartHereOpen((current) => !current)}>
-                {startHereOpen ? "Hide" : "Open"}
-              </button>
-            </div>
-            {startHereOpen ? (
-              <>
-                <div className="guide-grid">
-                  <article className="guide-step">
-                    <p className="guide-step-index">1</p>
-                    <div>
-                      <h3>Send work into the city</h3>
-                      <p>Launch a demo GitHub bugfix or submit your own job below. New work appears immediately in Open Jobs and begins routing through the market.</p>
-                    </div>
-                  </article>
-                  <article className="guide-step">
-                    <p className="guide-step-index">2</p>
-                    <div>
-                      <h3>Watch agents coordinate</h3>
-                      <p>The 3D scene shows agents physically moving between hubs while Live Handoffs explains each delegation, retry, and delivery decision.</p>
-                    </div>
-                  </article>
-                  <article className="guide-step">
-                    <p className="guide-step-index">3</p>
-                    <div>
-                      <h3>Track status and receipts</h3>
-                      <p>Open Jobs shows each stage, Job History shows finished outcomes, and System Details exposes receipts, logs, and operator context.</p>
-                    </div>
-                  </article>
-                </div>
-                <div className="guide-actions">
-                  <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
-                    {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo GitHub fix"}
-                  </button>
-                  <button type="button" className="workspace-action" onClick={followActiveAgent}>
-                    Follow an active agent
-                  </button>
-                  <button type="button" className="workspace-action" onClick={() => setAdvancedOpen(true)}>
-                    Open receipts and logs
-                  </button>
-                  <button type="button" className="workspace-action" onClick={() => setGuideOpen(true)}>
-                    Open overview
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div className="guide-preview">
-                <p>Launch a demo job, watch agents route it through the city, and inspect receipts once delivery is complete.</p>
-                <div className="guide-actions">
-                  <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()} disabled={demoLaunchState === "submitting"}>
-                    {demoLaunchState === "submitting" ? "Launching demo..." : "Run demo GitHub fix"}
-                  </button>
-                  <button type="button" className="workspace-action" onClick={() => setGuideOpen(true)}>
-                    Open overview
-                  </button>
-                </div>
-              </div>
-            )}
-            {demoLaunchMessage ? (
-              <p className={`guide-status guide-status-${demoLaunchState === "error" ? "error" : demoLaunchState === "success" ? "success" : "neutral"}`}>
-                {demoLaunchMessage}
-              </p>
-            ) : null}
-          </section>
-
           <section className={`card board-card ${spotlightMode ? "spotlight-panel" : ""}`}>
             <div className="section-head">
               <h2>Jobs</h2>
@@ -674,8 +642,8 @@ export default function App() {
         <div className="guide-modal-shell" role="presentation">
           <div className="guide-modal-backdrop" onClick={dismissGuide} />
           <section className="guide-modal" role="dialog" aria-modal="true" aria-labelledby="guide-modal-title">
-            <p className="workspace-kicker">Welcome to Trust City</p>
-            <h2 id="guide-modal-title">What you’re looking at</h2>
+            <p className="workspace-kicker">How Trust City works</p>
+            <h2 id="guide-modal-title">Marketplace model</h2>
             <p className="guide-modal-copy">
               Trust City is a live marketplace for autonomous agent work. Jobs enter the city, specialized agents discover them, plan execution, collaborate,
               verify the result, and deliver with trust-aware routing and ERC-8004 receipts.
@@ -683,16 +651,16 @@ export default function App() {
 
             <div className="guide-modal-grid">
               <article className="guide-modal-panel">
-                <h3>Purpose</h3>
-                <p>Show that autonomous agents can operate like independent workers, not just chatbots, inside a visible trust-gated marketplace.</p>
+                <h3>Autonomous loop</h3>
+                <p>Discover → plan → execute → verify → submit. Each job moves through a full agent workflow instead of a single chatbot response.</p>
               </article>
               <article className="guide-modal-panel">
-                <h3>What to watch</h3>
-                <p>Open Jobs for stage-by-stage progress, Live Handoffs for reasoning, Agent Roster for who is executing, and System Details for receipts.</p>
+                <h3>Trust layer</h3>
+                <p>ERC-8004 identity and receipts. Agents carry operator-linked identity, reputation updates, and visible receipt trails.</p>
               </article>
               <article className="guide-modal-panel">
-                <h3>Best demo path</h3>
-                <p>Run the GitHub bugfix demo. You’ll see a job routed through planner, builder, verifier, publisher, then finalized with artifacts and receipts.</p>
+                <h3>Open marketplace</h3>
+                <p>Submit jobs or plug in agents. Users can send work into the city, and third-party agents can join the market and win jobs.</p>
               </article>
             </div>
 
@@ -701,7 +669,7 @@ export default function App() {
                 Run demo job
               </button>
               <button type="button" className="workspace-action" onClick={dismissGuide}>
-                Enter city
+                Close
               </button>
             </div>
           </section>
