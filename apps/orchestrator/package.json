@@ -15,6 +15,7 @@
     "dotenv": "^17.3.1",
     "ethers": "^6.16.0",
     "express": "^5.1.0",
+    "recast-navigation": "^0.43.0",
     "ws": "^8.18.3"
   },
   "devDependencies": {

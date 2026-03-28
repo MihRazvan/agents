@@ -29,6 +29,15 @@ function worldPoint(position: { x: number; y: number }, y = 0.92): [number, numb
 const POSITION_DAMP = 8.8;
 const ROTATION_DAMP = 11.5;
 const MODEL_FORWARD_OFFSET = 0;
+const MOVEMENT_CLIP_THRESHOLD = 0.16;
+
+function desiredClipForAgent(agent: AgentRuntimeState, speed: number): string {
+  const moving = speed > MOVEMENT_CLIP_THRESHOLD || agent.path.length > 0;
+  if (moving) {
+    return agent.phase === "execute" || agent.phase === "submit" ? "Running" : "Walking";
+  }
+  return PHASE_TO_CLIP[agent.phase] ?? "Idle";
+}
 
 export default function AnimatedAgentAvatar({ agent, job, chat, selected = false }: Props) {
   const rootRef = useRef<THREE.Group>(null);
@@ -64,30 +73,8 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
   const color = AGENT_COLORS[agent.role];
 
   useEffect(() => {
-    const nextWaypoint = agent.path[0] ?? agent.target;
-    const dx = nextWaypoint.x - agent.position.x;
-    const dz = nextWaypoint.y - agent.position.y;
-    const length = Math.hypot(dx, dz) || 1;
-    const lead = agent.phase === "idle" ? 0 : Math.min(0.72, 0.16 + length * 0.28);
-    targetPosRef.current.set(agent.position.x + (dx / length) * lead, 0.92, agent.position.y + (dz / length) * lead);
+    targetPosRef.current.set(agent.position.x, 0.92, agent.position.y);
   }, [agent.position.x, agent.position.y, agent.target.x, agent.target.y, agent.phase, agent.path]);
-
-  useEffect(() => {
-    const desired = PHASE_TO_CLIP[agent.phase] ?? "Idle";
-    if (clipRef.current === desired) {
-      return;
-    }
-
-    const nextAction = actions[desired] ?? actions.Idle;
-    if (!nextAction) {
-      return;
-    }
-
-    const previous = actions[clipRef.current];
-    previous?.fadeOut(0.25);
-    nextAction.reset().fadeIn(0.25).play();
-    clipRef.current = desired;
-  }, [agent.phase, actions]);
 
   useEffect(() => {
     const bootAction = actions[clipRef.current] ?? actions.Idle;
@@ -115,12 +102,15 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
 
     if (frameDistance > 0.0008) {
       headingRef.current = Math.atan2(moveDx, moveDz);
-    } else {
-      const lookDx = targetPosRef.current.x - currentPosRef.current.x;
-      const lookDz = targetPosRef.current.z - currentPosRef.current.z;
-      if (Math.hypot(lookDx, lookDz) > 0.0008) {
-        headingRef.current = Math.atan2(lookDx, lookDz);
-      }
+    }
+
+    const desiredClip = desiredClipForAgent(agent, speedRef.current);
+    if (clipRef.current !== desiredClip) {
+      const nextAction = actions[desiredClip] ?? actions.Idle;
+      const previousAction = actions[clipRef.current];
+      previousAction?.fadeOut(0.22);
+      nextAction?.reset().fadeIn(0.22).play();
+      clipRef.current = desiredClip;
     }
 
     rootRef.current.rotation.y = THREE.MathUtils.damp(rootRef.current.rotation.y, headingRef.current + MODEL_FORWARD_OFFSET, ROTATION_DAMP, delta);

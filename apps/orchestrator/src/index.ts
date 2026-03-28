@@ -30,7 +30,7 @@ import {
   type WorldSnapshot,
   type WsMessage
 } from "@trust-city/shared";
-import { createNavigation } from "./navigation.js";
+import { createNavigation, type CrowdAgentConfig } from "./navigation.js";
 import { runGithubIssueStage } from "./githubIssueLane.js";
 import { OnchainManager } from "./onchain.js";
 
@@ -143,7 +143,7 @@ const stageByIndex: Array<{ key: AgentPhase; role: AgentRole; label: string }> =
 
 const rng = mulberry32(WORLD_SEED);
 const districts = buildDistricts();
-const navigation = createNavigation({
+const navigation = await createNavigation({
   worldSeed: WORLD_SEED,
   gridMin: GRID_MIN,
   gridMax: GRID_MAX,
@@ -223,6 +223,26 @@ function createCoreAgent(config: {
     capabilities: config.capabilities,
     statusLine: `Ready at ${ROLE_HUBS[config.role].name}`
   };
+}
+
+function crowdConfigFor(agent: Pick<AgentRuntimeState, "speed" | "kind" | "role">): CrowdAgentConfig {
+  const maxSpeed = agent.speed * (1000 / LOOP_INTERVAL_MS);
+  return {
+    radius: agent.kind === "plugin" ? 0.4 : agent.role === "builder" ? 0.44 : 0.42,
+    height: 1.1,
+    maxSpeed,
+    maxAcceleration: maxSpeed * 3.6,
+    collisionQueryRange: 2.2,
+    pathOptimizationRange: 8,
+    separationWeight: agent.kind === "plugin" ? 1.1 : 1.6
+  };
+}
+
+function registerAgentMotion(agent: AgentRuntimeState): void {
+  const safePosition = navigation.registerCrowdAgent(agent.id, agent.position, crowdConfigFor(agent));
+  agent.position = safePosition;
+  agent.target = safePosition;
+  agent.path = [];
 }
 
 const agents: AgentRuntimeState[] = [
@@ -309,6 +329,8 @@ const agents: AgentRuntimeState[] = [
     )
   })
 ];
+
+agents.forEach((agent) => registerAgentMotion(agent));
 
 const app = express();
 app.use(cors());
@@ -643,7 +665,7 @@ function normalizeJobSubmission(body: JobSubmissionRequest): JobTemplate | null 
 
 function setAgentDestination(agent: AgentRuntimeState, destination: Vec2): void {
   const safeDestination = navigation.ensureWalkable(destination);
-  const path = navigation.planPath(agent.position, safeDestination);
+  const path = navigation.setCrowdAgentTarget(agent.id, safeDestination);
   agent.path = path;
   agent.target = path[0] ?? safeDestination;
 }
@@ -1167,52 +1189,34 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
   workflow.activeAgentId = undefined;
 }
 
-function tickMovement(stepScale = 1): boolean {
+function tickMovement(deltaSeconds: number): boolean {
   let moved = false;
 
   for (const agent of agents) {
-    if (agent.path.length === 0) {
-      agent.energy = Math.max(0.2, Math.min(1, agent.energy + (agent.phase === "idle" ? 0.008 : -0.002)));
+    if (agent.phase === "idle") {
+      agent.energy = Math.max(0.2, Math.min(1, agent.energy + 0.008));
+    } else {
+      agent.energy = Math.max(0.2, Math.min(1, agent.energy - 0.005));
+    }
+  }
+
+  navigation.stepCrowd(deltaSeconds);
+
+  for (const agent of agents) {
+    const snapshot = navigation.syncCrowdAgent(agent.id);
+    if (!snapshot) {
       continue;
     }
 
-    const waypoint = agent.path[0];
-    const nextWaypoint = agent.path[1];
-    agent.target = waypoint;
-
-    const dx = waypoint.x - agent.position.x;
-    const dy = waypoint.y - agent.position.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const step = agent.speed * stepScale;
-
-    if (dist <= Math.max(step * 1.05, 0.08)) {
-      agent.position.x = waypoint.x;
-      agent.position.y = waypoint.y;
-      agent.path.shift();
-      agent.target = agent.path[0] ?? waypoint;
+    const dx = snapshot.position.x - agent.position.x;
+    const dy = snapshot.position.y - agent.position.y;
+    if (Math.hypot(dx, dy) > 0.0005) {
       moved = true;
-    } else if (dist > 0.0001) {
-      let targetX = waypoint.x;
-      let targetY = waypoint.y;
-
-      if (nextWaypoint && dist < 1.2) {
-        const cornerBlend = Math.min(0.58, (1.2 - dist) / 1.2);
-        targetX += (nextWaypoint.x - waypoint.x) * cornerBlend;
-        targetY += (nextWaypoint.y - waypoint.y) * cornerBlend;
-      }
-
-      const steerX = targetX - agent.position.x;
-      const steerY = targetY - agent.position.y;
-      const steerDist = Math.sqrt(steerX * steerX + steerY * steerY);
-
-      if (steerDist > 0.0001) {
-        agent.position.x += (steerX / steerDist) * step;
-        agent.position.y += (steerY / steerDist) * step;
-        moved = true;
-      }
     }
 
-    agent.energy = Math.max(0.2, Math.min(1, agent.energy + (agent.phase === "idle" ? 0.008 : -0.005)));
+    agent.position = snapshot.position;
+    agent.target = snapshot.target;
+    agent.path = snapshot.path;
   }
 
   return moved;
@@ -1422,7 +1426,7 @@ function registerPluginAgent(request: PluginRegistrationRequest): PluginAgentRec
   if (record.status === "active") {
     const activeCount = agents.filter((agent) => agent.kind === "plugin").length;
     const spawnPoint = navigation.ensureWalkable(hubPoint("builder", { x: 14 + activeCount * 8, y: 8 - activeCount * 3 }));
-    agents.push({
+    const pluginAgent: AgentRuntimeState = {
       id: record.id,
       name: record.label,
       role: "builder",
@@ -1445,7 +1449,10 @@ function registerPluginAgent(request: PluginRegistrationRequest): PluginAgentRec
         1
       ),
       statusLine: "Awaiting marketplace jobs"
-    });
+    };
+
+    agents.push(pluginAgent);
+    registerAgentMotion(pluginAgent);
 
     if (!onchain.enabled) {
       emitLocalReceipt("identity_registry_registration", undefined, { pluginAgentId: record.id, operatorWallet: record.operatorWallet });
@@ -1560,7 +1567,7 @@ function mainLoop(): void {
 }
 
 function movementLoop(): void {
-  const moved = tickMovement(MOVEMENT_INTERVAL_MS / LOOP_INTERVAL_MS);
+  const moved = tickMovement(MOVEMENT_INTERVAL_MS / 1000);
   if (!moved) {
     return;
   }

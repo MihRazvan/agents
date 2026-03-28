@@ -5,11 +5,6 @@ interface GridPoint {
   y: number;
 }
 
-interface QueueNode {
-  cell: GridPoint;
-  f: number;
-}
-
 export interface NavigationConfig {
   worldSeed: number;
   gridMin: number;
@@ -21,131 +16,213 @@ export interface NavigationConfig {
   roadMinorHalfWidth: number;
 }
 
+export interface CrowdAgentConfig {
+  radius?: number;
+  height?: number;
+  maxAcceleration?: number;
+  maxSpeed?: number;
+  collisionQueryRange?: number;
+  pathOptimizationRange?: number;
+  separationWeight?: number;
+}
+
+interface CrowdAgentSnapshot {
+  position: Vec2;
+  velocity: Vec2;
+  path: Vec2[];
+  target: Vec2;
+}
+
+interface RecastCrowdAgent {
+  requestMoveTarget(position: { x: number; y: number; z: number }): boolean;
+  resetMoveTarget(): void;
+  teleport(position: { x: number; y: number; z: number }): void;
+  position(): { x: number; y: number; z: number };
+  velocity(): { x: number; y: number; z: number };
+  target(): { x: number; y: number; z: number };
+  corners(): Array<{ x: number; y: number; z: number }>;
+}
+
+interface RecastCrowd {
+  addAgent(position: { x: number; y: number; z: number }, params: Record<string, unknown>): RecastCrowdAgent;
+  removeAgent(agent: RecastCrowdAgent): void;
+  update(dt: number): void;
+}
+
 export interface NavigationApi {
   ensureWalkable: (point: Vec2) => Vec2;
   planPath: (start: Vec2, goal: Vec2) => Vec2[];
   distance: (a: Vec2, b: Vec2) => number;
+  registerCrowdAgent: (id: string, position: Vec2, config?: CrowdAgentConfig) => Vec2;
+  removeCrowdAgent: (id: string) => void;
+  setCrowdAgentTarget: (id: string, target: Vec2) => Vec2[];
+  resetCrowdAgentTarget: (id: string) => void;
+  stepCrowd: (deltaSeconds: number) => void;
+  syncCrowdAgent: (id: string) => CrowdAgentSnapshot | null;
 }
+
+const QUERY_HALF_EXTENTS = { x: 3, y: 4, z: 3 };
 
 function keyForCell(cell: GridPoint): string {
   return `${cell.x},${cell.y}`;
 }
 
-function direction(a: Vec2, b: Vec2): Vec2 {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len = Math.sqrt(dx * dx + dy * dy) || 1;
-  return { x: dx / len, y: dy / len };
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
-function simplifyPath(points: Vec2[]): Vec2[] {
-  if (points.length <= 2) {
-    return points;
-  }
+function distanceToGridLine(value: number, spacing: number): number {
+  const mod = ((value % spacing) + spacing) % spacing;
+  return Math.min(mod, spacing - mod);
+}
 
-  const compressed: Vec2[] = [points[0]];
-  for (let i = 1; i < points.length - 1; i += 1) {
-    const prev = compressed[compressed.length - 1];
-    const current = points[i];
-    const next = points[i + 1];
-    const d1 = direction(prev, current);
-    const d2 = direction(current, next);
-    const aligned = Math.abs(d1.x - d2.x) < 0.01 && Math.abs(d1.y - d2.y) < 0.01;
-    if (!aligned) {
-      compressed.push(current);
+function nearestGridLine(value: number, spacing: number): number {
+  return Math.round(value / spacing) * spacing;
+}
+
+function toVector3(point: Vec2) {
+  return { x: point.x, y: 0, z: point.y };
+}
+
+function fromVector3(point: { x: number; y: number; z: number }): Vec2 {
+  return { x: point.x, y: point.z };
+}
+
+function pushQuad(positions: number[], indices: number[], minX: number, minZ: number, maxX: number, maxZ: number): void {
+  const base = positions.length / 3;
+  positions.push(minX, 0, minZ, maxX, 0, minZ, maxX, 0, maxZ, minX, 0, maxZ);
+  indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
+}
+
+function sanitizePath(points: Vec2[], start: Vec2, goal: Vec2, appendGoal = true): Vec2[] {
+  const filtered: Vec2[] = [];
+
+  for (const point of points) {
+    const previous = filtered[filtered.length - 1];
+    if (previous && Math.hypot(previous.x - point.x, previous.y - point.y) < 0.02) {
+      continue;
     }
+    if (Math.hypot(point.x - start.x, point.y - start.y) < 0.08) {
+      continue;
+    }
+    filtered.push(point);
   }
-  compressed.push(points[points.length - 1]);
-  return compressed;
+
+  const tail = filtered[filtered.length - 1];
+  if (appendGoal && (!tail || Math.hypot(tail.x - goal.x, tail.y - goal.y) > 0.08)) {
+    filtered.push(goal);
+  }
+
+  return filtered;
 }
 
-export function createNavigation(config: NavigationConfig): NavigationApi {
-  function clampToGrid(point: Vec2): GridPoint {
-    return {
-      x: Math.max(config.gridMin, Math.min(config.gridMax, Math.round(point.x / config.gridStep) * config.gridStep)),
-      y: Math.max(config.gridMin, Math.min(config.gridMax, Math.round(point.y / config.gridStep) * config.gridStep))
+export async function createNavigation(config: NavigationConfig): Promise<NavigationApi> {
+  const recastCore = await import("@recast-navigation/core/dist/index.mjs");
+  const recastGenerators = await import("@recast-navigation/generators/dist/index.mjs");
+  const { Crowd, NavMeshQuery, init: initRecast } = recastCore as {
+    Crowd: new (navMesh: unknown, params: { maxAgents: number; maxAgentRadius: number }) => RecastCrowd;
+    NavMeshQuery: new (navMesh: unknown) => {
+      findClosestPoint: (position: { x: number; y: number; z: number }, options: { halfExtents: { x: number; y: number; z: number } }) => {
+        success: boolean;
+        point: { x: number; y: number; z: number };
+      };
+      computePath: (
+        start: { x: number; y: number; z: number },
+        end: { x: number; y: number; z: number },
+        options: { halfExtents: { x: number; y: number; z: number }; maxStraightPathPoints: number }
+      ) => { success: boolean; path: Array<{ x: number; y: number; z: number }> };
     };
+    init: () => Promise<void>;
+  };
+  const { generateSoloNavMesh } = recastGenerators as {
+    generateSoloNavMesh: (
+      positions: ArrayLike<number>,
+      indices: ArrayLike<number>,
+      config: Record<string, unknown>
+    ) => { success: boolean; navMesh?: unknown; error?: string };
+  };
+
+  await initRecast();
+
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const roadCells = new Set<string>();
+  const padding = Math.max(config.roadMajorHalfWidth, config.roadMinorHalfWidth) + 1;
+
+  for (let x = config.gridMin; x <= config.gridMax; x += config.roadMinorSpacing) {
+    const major = distanceToGridLine(x, config.roadMajorSpacing) <= config.roadMajorHalfWidth;
+    const halfWidth = major ? config.roadMajorHalfWidth : config.roadMinorHalfWidth;
+    pushQuad(positions, indices, x - halfWidth, config.gridMin - padding, x + halfWidth, config.gridMax + padding);
   }
 
-  function distanceToGridLine(value: number, spacing: number): number {
-    const mod = ((value % spacing) + spacing) % spacing;
-    return Math.min(mod, spacing - mod);
+  for (let y = config.gridMin; y <= config.gridMax; y += config.roadMinorSpacing) {
+    const major = distanceToGridLine(y, config.roadMajorSpacing) <= config.roadMajorHalfWidth;
+    const halfWidth = major ? config.roadMajorHalfWidth : config.roadMinorHalfWidth;
+    pushQuad(positions, indices, config.gridMin - padding, y - halfWidth, config.gridMax + padding, y + halfWidth);
   }
 
-  function nearestGridLine(value: number, spacing: number): number {
-    return Math.round(value / spacing) * spacing;
+  for (let x = config.gridMin; x <= config.gridMax; x += config.gridStep) {
+    for (let y = config.gridMin; y <= config.gridMax; y += config.gridStep) {
+      const onMajorRoad =
+        distanceToGridLine(x, config.roadMajorSpacing) <= config.roadMajorHalfWidth ||
+        distanceToGridLine(y, config.roadMajorSpacing) <= config.roadMajorHalfWidth;
+      const onMinorRoad =
+        distanceToGridLine(x, config.roadMinorSpacing) <= config.roadMinorHalfWidth ||
+        distanceToGridLine(y, config.roadMinorSpacing) <= config.roadMinorHalfWidth;
+
+      if (onMajorRoad || onMinorRoad) {
+        roadCells.add(keyForCell({ x, y }));
+      }
+    }
   }
 
-  function isRoadCell(cell: GridPoint): boolean {
-    const majorRoad =
-      distanceToGridLine(cell.x, config.roadMajorSpacing) <= config.roadMajorHalfWidth ||
-      distanceToGridLine(cell.y, config.roadMajorSpacing) <= config.roadMajorHalfWidth;
-    if (majorRoad) {
-      return true;
+  const navMeshResult = generateSoloNavMesh(positions, indices, {
+    cs: 0.2,
+    ch: 0.2,
+    walkableSlopeAngle: 45,
+    walkableHeight: 2,
+    walkableClimb: 0.45,
+    walkableRadius: 0.45,
+    maxEdgeLen: 32,
+    maxSimplificationError: 1.1,
+    minRegionArea: 4,
+    mergeRegionArea: 12,
+    maxVertsPerPoly: 6,
+    detailSampleDist: 1,
+    detailSampleMaxError: 0.1,
+    bounds: [
+      [config.gridMin - padding, -1, config.gridMin - padding],
+      [config.gridMax + padding, 1, config.gridMax + padding]
+    ]
+  });
+
+  if (!navMeshResult.success || !navMeshResult.navMesh) {
+    throw new Error(`Failed to build road navmesh: ${"error" in navMeshResult ? navMeshResult.error : "unknown error"}`);
+  }
+
+  const navMesh = navMeshResult.navMesh;
+  const navMeshQuery = new NavMeshQuery(navMesh);
+  const crowd = new Crowd(navMesh, { maxAgents: 96, maxAgentRadius: 1.1 });
+  const crowdAgents = new Map<string, RecastCrowdAgent>();
+  const requestedTargets = new Map<string, Vec2>();
+
+  function fallbackWalkable(point: Vec2): Vec2 {
+    const x = clamp(Math.round(point.x / config.gridStep) * config.gridStep, config.gridMin, config.gridMax);
+    const y = clamp(Math.round(point.y / config.gridStep) * config.gridStep, config.gridMin, config.gridMax);
+
+    if (roadCells.has(keyForCell({ x, y }))) {
+      return {
+        x: distanceToGridLine(x, config.roadMinorSpacing) <= config.roadMinorHalfWidth ? nearestGridLine(x, config.roadMinorSpacing) : x,
+        y: distanceToGridLine(y, config.roadMinorSpacing) <= config.roadMinorHalfWidth ? nearestGridLine(y, config.roadMinorSpacing) : y
+      };
     }
 
-    const minorRoad =
-      distanceToGridLine(cell.x, config.roadMinorSpacing) <= config.roadMinorHalfWidth ||
-      distanceToGridLine(cell.y, config.roadMinorSpacing) <= config.roadMinorHalfWidth;
-    return minorRoad;
-  }
-
-  function isBlockedCell(cell: GridPoint): boolean {
-    if (cell.x < config.gridMin || cell.x > config.gridMax || cell.y < config.gridMin || cell.y > config.gridMax) {
-      return true;
-    }
-    return !isRoadCell(cell);
-  }
-
-  function movementCost(cell: GridPoint): number {
-    return isRoadCell(cell) ? 1 : 1.45;
-  }
-
-  function heuristic(a: GridPoint, b: GridPoint): number {
-    return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-  }
-
-  function neighborCells(cell: GridPoint): GridPoint[] {
-    return [
-      { x: cell.x + config.gridStep, y: cell.y },
-      { x: cell.x - config.gridStep, y: cell.y },
-      { x: cell.x, y: cell.y + config.gridStep },
-      { x: cell.x, y: cell.y - config.gridStep }
-    ];
-  }
-
-  function cellToVec2(cell: GridPoint): Vec2 {
-    return { x: cell.x, y: cell.y };
-  }
-
-  function snapToRoadCenter(cell: GridPoint): GridPoint {
-    const snapped = { ...cell };
-    const nearestMinorX = nearestGridLine(cell.x, config.roadMinorSpacing);
-    const nearestMinorY = nearestGridLine(cell.y, config.roadMinorSpacing);
-
-    if (Math.abs(cell.x - nearestMinorX) <= config.roadMinorHalfWidth) {
-      snapped.x = nearestMinorX;
-    }
-
-    if (Math.abs(cell.y - nearestMinorY) <= config.roadMinorHalfWidth) {
-      snapped.y = nearestMinorY;
-    }
-
-    return snapped;
-  }
-
-  function ensureWalkable(point: Vec2): Vec2 {
-    const start = clampToGrid(point);
-    if (!isBlockedCell(start)) {
-      return cellToVec2(snapToRoadCenter(start));
-    }
-
-    for (let radius = 1; radius <= 6; radius += 1) {
+    for (let radius = 1; radius <= 8; radius += 1) {
       for (let dx = -radius; dx <= radius; dx += 1) {
         for (let dy = -radius; dy <= radius; dy += 1) {
-          const candidate: GridPoint = { x: start.x + dx, y: start.y + dy };
-          if (!isBlockedCell(candidate)) {
-            return cellToVec2(snapToRoadCenter(candidate));
+          const candidate = { x: x + dx, y: y + dy };
+          if (roadCells.has(keyForCell(candidate))) {
+            return candidate;
           }
         }
       }
@@ -154,73 +231,107 @@ export function createNavigation(config: NavigationConfig): NavigationApi {
     return { x: 0, y: 0 };
   }
 
-  function reconstructPath(cameFrom: Map<string, GridPoint>, current: GridPoint): Vec2[] {
-    const path: GridPoint[] = [current];
-    let pointer = current;
-
-    while (cameFrom.has(keyForCell(pointer))) {
-      pointer = cameFrom.get(keyForCell(pointer))!;
-      path.push(pointer);
+  function ensureWalkable(point: Vec2): Vec2 {
+    const closest = navMeshQuery.findClosestPoint(toVector3(point), { halfExtents: QUERY_HALF_EXTENTS });
+    if (closest.success) {
+      return fromVector3(closest.point);
     }
 
-    path.reverse();
-    return path.map(cellToVec2);
+    return fallbackWalkable(point);
   }
 
   function planPath(start: Vec2, goal: Vec2): Vec2[] {
-    const origin = snapToRoadCenter(clampToGrid(ensureWalkable(start)));
-    const target = snapToRoadCenter(clampToGrid(ensureWalkable(goal)));
+    const safeStart = ensureWalkable(start);
+    const safeGoal = ensureWalkable(goal);
+    const result = navMeshQuery.computePath(toVector3(safeStart), toVector3(safeGoal), {
+      halfExtents: QUERY_HALF_EXTENTS,
+      maxStraightPathPoints: 64
+    });
 
-    if (origin.x === target.x && origin.y === target.y) {
-      return [goal];
+    if (!result.success || result.path.length === 0) {
+      return [safeGoal];
     }
 
-    const openSet: QueueNode[] = [{ cell: origin, f: heuristic(origin, target) }];
-    const cameFrom = new Map<string, GridPoint>();
-    const gScore = new Map<string, number>([[keyForCell(origin), 0]]);
-    const closedSet = new Set<string>();
+    return sanitizePath(result.path.map(fromVector3), safeStart, safeGoal, true);
+  }
 
-    while (openSet.length > 0) {
-      openSet.sort((a, b) => a.f - b.f);
-      const current = openSet.shift()!.cell;
-      const currentKey = keyForCell(current);
+  function registerCrowdAgent(id: string, position: Vec2, crowdConfig: CrowdAgentConfig = {}): Vec2 {
+    const safePosition = ensureWalkable(position);
 
-      if (current.x === target.x && current.y === target.y) {
-        const result = reconstructPath(cameFrom, current);
-        if (result.length > 1) {
-          result.shift();
-        }
-        result.push(goal);
-        return simplifyPath(result);
-      }
-
-      closedSet.add(currentKey);
-
-      for (const neighbor of neighborCells(current)) {
-        const neighborKey = keyForCell(neighbor);
-        if (closedSet.has(neighborKey) || isBlockedCell(neighbor)) {
-          continue;
-        }
-
-        const tentative = (gScore.get(currentKey) ?? Number.POSITIVE_INFINITY) + movementCost(neighbor);
-        if (tentative >= (gScore.get(neighborKey) ?? Number.POSITIVE_INFINITY)) {
-          continue;
-        }
-
-        cameFrom.set(neighborKey, current);
-        gScore.set(neighborKey, tentative);
-        const f = tentative + heuristic(neighbor, target);
-
-        const inOpen = openSet.find((node) => node.cell.x === neighbor.x && node.cell.y === neighbor.y);
-        if (inOpen) {
-          inOpen.f = f;
-        } else {
-          openSet.push({ cell: neighbor, f });
-        }
-      }
+    const existing = crowdAgents.get(id);
+    if (existing) {
+      existing.teleport(toVector3(safePosition));
+      requestedTargets.set(id, safePosition);
+      return safePosition;
     }
 
-    return simplifyPath([start, goal]);
+    const agent = crowd.addAgent(toVector3(safePosition), {
+      radius: crowdConfig.radius ?? 0.42,
+      height: crowdConfig.height ?? 1.1,
+      maxAcceleration: crowdConfig.maxAcceleration ?? 8,
+      maxSpeed: crowdConfig.maxSpeed ?? 2.6,
+      collisionQueryRange: crowdConfig.collisionQueryRange ?? 1.8,
+      pathOptimizationRange: crowdConfig.pathOptimizationRange ?? 6,
+      separationWeight: crowdConfig.separationWeight ?? 1.4
+    });
+
+    crowdAgents.set(id, agent);
+    requestedTargets.set(id, safePosition);
+    return safePosition;
+  }
+
+  function removeCrowdAgent(id: string): void {
+    const agent = crowdAgents.get(id);
+    if (!agent) {
+      return;
+    }
+    crowd.removeAgent(agent);
+    crowdAgents.delete(id);
+    requestedTargets.delete(id);
+  }
+
+  function setCrowdAgentTarget(id: string, target: Vec2): Vec2[] {
+    const agent = crowdAgents.get(id);
+    const safeTarget = ensureWalkable(target);
+    if (!agent) {
+      return [safeTarget];
+    }
+
+    requestedTargets.set(id, safeTarget);
+    agent.requestMoveTarget(toVector3(safeTarget));
+    return planPath(fromVector3(agent.position()), safeTarget);
+  }
+
+  function resetCrowdAgentTarget(id: string): void {
+    const agent = crowdAgents.get(id);
+    if (!agent) {
+      return;
+    }
+    requestedTargets.set(id, fromVector3(agent.position()));
+    agent.resetMoveTarget();
+  }
+
+  function stepCrowd(deltaSeconds: number): void {
+    crowd.update(deltaSeconds);
+  }
+
+  function syncCrowdAgent(id: string): CrowdAgentSnapshot | null {
+    const agent = crowdAgents.get(id);
+    if (!agent) {
+      return null;
+    }
+
+    const position = fromVector3(agent.position());
+    const velocity = fromVector3(agent.velocity());
+    const corners = agent.corners().map(fromVector3);
+    const target = requestedTargets.get(id) ?? fromVector3(agent.target());
+
+    return {
+      position,
+      velocity,
+      path: sanitizePath(corners, position, target, false),
+      target
+    };
   }
 
   function distance(a: Vec2, b: Vec2): number {
@@ -232,6 +343,12 @@ export function createNavigation(config: NavigationConfig): NavigationApi {
   return {
     ensureWalkable,
     planPath,
-    distance
+    distance,
+    registerCrowdAgent,
+    removeCrowdAgent,
+    setCrowdAgentTarget,
+    resetCrowdAgentTarget,
+    stepCrowd,
+    syncCrowdAgent
   };
 }
