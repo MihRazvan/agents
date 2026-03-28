@@ -429,14 +429,30 @@ function ExchangeFloor({ center }: { center: Vec2 }) {
         <circleGeometry args={[132, 96]} />
         <meshStandardMaterial color="#0d1521" emissive="#0b1521" emissiveIntensity={0.18} roughness={0.96} metalness={0.08} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
-        <ringGeometry args={[74, 75.6, 72]} />
-        <meshStandardMaterial color="#64c9ff" emissive="#64c9ff" emissiveIntensity={1.2} transparent opacity={0.16} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <circleGeometry args={[124, 80]} />
+        <meshStandardMaterial color="#0b121c" emissive="#0c1620" emissiveIntensity={0.08} roughness={1} metalness={0.04} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <ringGeometry args={[118, 119.2, 96]} />
-        <meshStandardMaterial color="#ffb66b" emissive="#ffb66b" emissiveIntensity={0.82} transparent opacity={0.08} />
+        <ringGeometry args={[74, 74.8, 72]} />
+        <meshStandardMaterial color="#445263" emissive="#445263" emissiveIntensity={0.08} transparent opacity={0.34} />
       </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+        <ringGeometry args={[118, 118.8, 96]} />
+        <meshStandardMaterial color="#56493a" emissive="#56493a" emissiveIntensity={0.04} transparent opacity={0.18} />
+      </mesh>
+      {[-84, -42, 0, 42, 84].map((offset) => (
+        <mesh key={`h-${offset}`} position={[0, 0.02, offset]}>
+          <boxGeometry args={[192, 0.01, 0.14]} />
+          <meshStandardMaterial color="#24303e" emissive="#24303e" emissiveIntensity={0.04} transparent opacity={0.22} />
+        </mesh>
+      ))}
+      {[-84, -42, 0, 42, 84].map((offset) => (
+        <mesh key={`v-${offset}`} position={[offset, 0.02, 0]}>
+          <boxGeometry args={[0.14, 0.01, 192]} />
+          <meshStandardMaterial color="#24303e" emissive="#24303e" emissiveIntensity={0.04} transparent opacity={0.22} />
+        </mesh>
+      ))}
     </group>
   );
 }

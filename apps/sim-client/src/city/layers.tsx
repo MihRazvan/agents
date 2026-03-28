@@ -58,6 +58,10 @@ export function StructureBlock({ structure }: { structure: CityStructure }) {
   if (structure.kind === "house") {
     return (
       <group position={[structure.x, 0, structure.z]}>
+        <mesh position={[0, 0.03, 0]} receiveShadow>
+          <boxGeometry args={[structure.width * 1.14, 0.06, structure.depth * 1.14]} />
+          <meshStandardMaterial color="#151d28" roughness={0.95} />
+        </mesh>
         <mesh position={[0, structure.height * 0.42, 0]} castShadow={structure.lod === "near"} receiveShadow>
           <boxGeometry args={[structure.width, structure.height * 0.84, structure.depth]} />
           <meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={0.22} roughness={0.56} metalness={0.12} />
@@ -81,6 +85,10 @@ export function StructureBlock({ structure }: { structure: CityStructure }) {
   if (structure.kind === "institution") {
     return (
       <group position={[structure.x, 0, structure.z]}>
+        <mesh position={[0, 0.04, 0]} receiveShadow>
+          <boxGeometry args={[structure.width * 1.08, 0.08, structure.depth * 1.08]} />
+          <meshStandardMaterial color="#111b27" roughness={0.92} metalness={0.08} />
+        </mesh>
         <mesh position={[0, structure.height / 2, 0]} castShadow={structure.lod === "near"} receiveShadow>
           <boxGeometry args={[structure.width, structure.height, structure.depth]} />
           <meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={0.28} metalness={0.3} roughness={0.44} />
@@ -104,6 +112,10 @@ export function StructureBlock({ structure }: { structure: CityStructure }) {
   if (structure.kind === "warehouse") {
     return (
       <group position={[structure.x, 0, structure.z]}>
+        <mesh position={[0, 0.03, 0]} receiveShadow>
+          <boxGeometry args={[structure.width * 1.08, 0.06, structure.depth * 1.08]} />
+          <meshStandardMaterial color="#10161f" roughness={0.96} />
+        </mesh>
         <mesh position={[0, structure.height * 0.5, 0]} castShadow={structure.lod === "near"} receiveShadow>
           <boxGeometry args={[structure.width, structure.height, structure.depth]} />
           <meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={0.18} metalness={0.2} roughness={0.68} />
@@ -124,8 +136,43 @@ export function StructureBlock({ structure }: { structure: CityStructure }) {
     );
   }
 
+  if (structure.kind === "midrise") {
+    return (
+      <group position={[structure.x, 0, structure.z]}>
+        <mesh position={[0, 0.05, 0]} receiveShadow>
+          <boxGeometry args={[structure.width * 1.08, 0.1, structure.depth * 1.08]} />
+          <meshStandardMaterial color="#121a26" roughness={0.94} metalness={0.08} />
+        </mesh>
+        <mesh position={[0, structure.height * 0.46, 0]} castShadow={structure.lod === "near"} receiveShadow>
+          <boxGeometry args={[structure.width, structure.height * 0.92, structure.depth]} />
+          <meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={0.24} metalness={0.22} roughness={0.54} />
+        </mesh>
+        {structure.lod === "near" ? (
+          <>
+            <mesh position={[0, structure.height * 0.96, 0]}>
+              <boxGeometry args={[structure.width * 0.74, structure.height * 0.18, structure.depth * 0.74]} />
+              <meshStandardMaterial color={color.clone().offsetHSL(0, -0.04, 0.04)} emissive={emissive} emissiveIntensity={0.26} metalness={0.28} roughness={0.4} />
+            </mesh>
+            <mesh position={[0, structure.height * 0.58, structure.depth * 0.5]}>
+              <boxGeometry args={[structure.width * 0.72, structure.height * 0.48, 0.04]} />
+              {glowMaterial("#9fd7ff", 0.32, 0.24)}
+            </mesh>
+            <mesh position={[0, structure.height * 0.58, -structure.depth * 0.5]}>
+              <boxGeometry args={[structure.width * 0.72, structure.height * 0.48, 0.04]} />
+              {glowMaterial("#9fd7ff", 0.32, 0.18)}
+            </mesh>
+          </>
+        ) : null}
+      </group>
+    );
+  }
+
   return (
     <group position={[structure.x, 0, structure.z]}>
+      <mesh position={[0, 0.06, 0]} receiveShadow>
+        <boxGeometry args={[structure.width * 1.1, 0.12, structure.depth * 1.1]} />
+        <meshStandardMaterial color="#121a26" roughness={0.94} metalness={0.08} />
+      </mesh>
       <mesh position={[0, structure.height / 2, 0]} castShadow={structure.lod === "near"} receiveShadow>
         <boxGeometry args={[structure.width, structure.height, structure.depth]} />
         <meshStandardMaterial
@@ -138,13 +185,21 @@ export function StructureBlock({ structure }: { structure: CityStructure }) {
       </mesh>
       {structure.kind === "tower" && structure.lod === "near" ? (
         <>
+          <mesh position={[0, structure.height * 0.82, 0]}>
+            <boxGeometry args={[structure.width * 0.84, structure.height * 0.24, structure.depth * 0.84]} />
+            <meshStandardMaterial color={color.clone().offsetHSL(0, -0.03, 0.05)} emissive={emissive} emissiveIntensity={0.3} metalness={0.38} roughness={0.28} />
+          </mesh>
           <mesh position={[0, structure.height + 0.4, 0]}>
             <boxGeometry args={[structure.width * 0.42, 0.18, structure.depth * 0.42]} />
             {glowMaterial(accent, 1.05, 0.94)}
           </mesh>
-          <mesh position={[0, structure.height * 0.68, structure.depth * 0.5]}>
-            <boxGeometry args={[structure.width * 0.64, structure.height * 0.42, 0.04]} />
+          <mesh position={[0, structure.height * 0.66, structure.depth * 0.5]}>
+            <boxGeometry args={[structure.width * 0.64, structure.height * 0.48, 0.04]} />
             {glowMaterial("#9ed8ff", 0.5, 0.42)}
+          </mesh>
+          <mesh position={[0, structure.height * 0.66, -structure.depth * 0.5]}>
+            <boxGeometry args={[structure.width * 0.64, structure.height * 0.48, 0.04]} />
+            {glowMaterial("#ffcf9b", 0.34, 0.18)}
           </mesh>
         </>
       ) : null}
@@ -156,21 +211,27 @@ export function DynamicRoads({ roads }: { roads: RoadLine[] }) {
   return (
     <group>
       {roads.map((road) => {
-        const color = road.kind === "major" ? "#242c36" : "#1a2029";
-        const laneGlow = road.kind === "major" ? "#4abfff" : "#314d71";
+        const color = road.kind === "major" ? "#262c33" : "#1b2026";
+        const markerColor = road.kind === "major" ? "#7d7364" : "#3f4650";
 
         return (
           <group key={`${road.axis}-${road.x}-${road.z}`} position={[road.x, 0.02, road.z]}>
             <mesh>
               <boxGeometry args={road.axis === "h" ? [road.length, 0.04, road.width] : [road.width, 0.04, road.length]} />
-              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={road.kind === "major" ? 0.22 : 0.08} roughness={0.92} />
+              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={road.kind === "major" ? 0.12 : 0.04} roughness={0.96} />
             </mesh>
-            {road.kind === "major" ? (
-              <mesh position={[0, 0.03, 0]}>
-                <boxGeometry args={road.axis === "h" ? [road.length, 0.01, 0.18] : [0.18, 0.01, road.length]} />
-                {glowMaterial(laneGlow, 0.95, 0.7)}
-              </mesh>
-            ) : null}
+            <mesh position={[0, 0.025, 0]}>
+              <boxGeometry args={road.axis === "h" ? [road.length, 0.008, 0.06] : [0.06, 0.008, road.length]} />
+              <meshStandardMaterial color={markerColor} emissive={markerColor} emissiveIntensity={road.kind === "major" ? 0.08 : 0.02} transparent opacity={road.kind === "major" ? 0.42 : 0.18} />
+            </mesh>
+            <mesh position={[0, 0.015, road.axis === "h" ? road.width * 0.5 - 0.18 : 0]} rotation={road.axis === "h" ? [0, 0, 0] : [0, Math.PI / 2, 0]}>
+              <boxGeometry args={[road.axis === "h" ? road.length : road.length, 0.01, 0.04]} />
+              <meshStandardMaterial color="#2d3742" emissive="#2d3742" emissiveIntensity={0.04} transparent opacity={0.45} />
+            </mesh>
+            <mesh position={[0, 0.015, road.axis === "h" ? -road.width * 0.5 + 0.18 : 0]} rotation={road.axis === "h" ? [0, 0, 0] : [0, Math.PI / 2, 0]}>
+              <boxGeometry args={[road.axis === "h" ? road.length : road.length, 0.01, 0.04]} />
+              <meshStandardMaterial color="#2d3742" emissive="#2d3742" emissiveIntensity={0.04} transparent opacity={0.45} />
+            </mesh>
           </group>
         );
       })}
@@ -185,12 +246,21 @@ export function DistrictOverlay({ snapshot, selectedAgentId }: { snapshot: World
       {snapshot.districts.map((district) => {
         const semantics = DISTRICT_THEME_PURPOSE[district.theme];
         const hue = district.theme === "core" ? "#59e4ff" : district.theme === "industrial" ? "#ff8f66" : district.theme === "research" ? "#89a0ff" : "#89ffb3";
+        const paving = district.theme === "core" ? "#101a28" : district.theme === "industrial" ? "#181714" : district.theme === "research" ? "#101423" : "#111b16";
         const isSelectedHome = selectedAgent?.homeDistrictId === district.id;
         return (
           <group key={district.id} position={[district.center.x, 0, district.center.y]}>
+            <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <circleGeometry args={[district.radius - 0.8, 48]} />
+              <meshStandardMaterial color={paving} emissive={paving} emissiveIntensity={0.08} roughness={0.98} metalness={0.04} transparent opacity={0.86} />
+            </mesh>
             <mesh rotation={[-Math.PI / 2, 0, 0]}>
-              <ringGeometry args={[district.radius - 0.14, district.radius, 64]} />
-              <meshStandardMaterial color={hue} emissive={hue} emissiveIntensity={0.65} transparent opacity={isSelectedHome ? 0.4 : 0.14} />
+              <ringGeometry args={[district.radius - 0.34, district.radius, 64]} />
+              <meshStandardMaterial color={hue} emissive={hue} emissiveIntensity={0.18} transparent opacity={isSelectedHome ? 0.26 : 0.08} />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+              <ringGeometry args={[district.radius * 0.42, district.radius * 0.44, 48]} />
+              <meshStandardMaterial color={hue} emissive={hue} emissiveIntensity={0.22} transparent opacity={isSelectedHome ? 0.16 : 0.05} />
             </mesh>
             <Html position={[0, 0.24, district.radius + 0.86]} center zIndexRange={WORLD_TAG_Z_INDEX_RANGE}>
               <div className={`world-tag world-tag-district ${isSelectedHome ? "world-tag-district-active" : ""}`}>
@@ -201,6 +271,83 @@ export function DistrictOverlay({ snapshot, selectedAgentId }: { snapshot: World
           </group>
         );
       })}
+    </group>
+  );
+}
+
+function HubGround({ role, color }: { role: keyof typeof ROLE_HUBS; color: string }) {
+  if (role === "scout") {
+    return (
+      <group>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0]}>
+          <circleGeometry args={[3.4, 32]} />
+          <meshStandardMaterial color="#101a25" roughness={0.98} />
+        </mesh>
+        <mesh position={[0, 0.03, 1.8]}>
+          <boxGeometry args={[2.2, 0.06, 4.8]} />
+          <meshStandardMaterial color="#122332" emissive="#19384d" emissiveIntensity={0.12} roughness={0.92} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (role === "planner") {
+    return (
+      <group>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+          <circleGeometry args={[3.8, 40]} />
+          <meshStandardMaterial color="#171d27" roughness={0.97} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+          <ringGeometry args={[1.5, 1.7, 32]} />
+          <meshStandardMaterial color="#4d4a40" emissive="#4d4a40" emissiveIntensity={0.08} transparent opacity={0.72} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (role === "builder") {
+    return (
+      <group>
+        <mesh position={[0, 0.03, 0]}>
+          <boxGeometry args={[4.8, 0.08, 4.2]} />
+          <meshStandardMaterial color="#141a14" roughness={0.95} />
+        </mesh>
+        {[-1.2, 0, 1.2].map((x) => (
+          <mesh key={x} position={[x, 0.09, -1.2]}>
+            <boxGeometry args={[0.56, 0.18, 0.56]} />
+            <meshStandardMaterial color="#3d4a36" emissive="#516843" emissiveIntensity={0.14} roughness={0.8} />
+          </mesh>
+        ))}
+      </group>
+    );
+  }
+
+  if (role === "verifier") {
+    return (
+      <group>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+          <circleGeometry args={[3.2, 32]} />
+          <meshStandardMaterial color="#1a171c" roughness={0.97} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+          <ringGeometry args={[1.8, 2.04, 36]} />
+          <meshStandardMaterial color="#5f4949" emissive="#5f4949" emissiveIntensity={0.08} transparent opacity={0.6} />
+        </mesh>
+      </group>
+    );
+  }
+
+  return (
+    <group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+        <circleGeometry args={[3.4, 36]} />
+        <meshStandardMaterial color="#171325" roughness={0.97} />
+      </mesh>
+      <mesh position={[0, 0.03, -1.4]}>
+        <boxGeometry args={[1.4, 0.08, 2.8]} />
+        <meshStandardMaterial color="#21193a" emissive="#352864" emissiveIntensity={0.12} roughness={0.88} />
+      </mesh>
     </group>
   );
 }
@@ -306,14 +453,7 @@ export function RoleHubLandmarks() {
         const color = AGENT_COLORS[role as keyof typeof AGENT_COLORS];
         return (
           <group key={role} position={[hub.position.x, 0, hub.position.y]}>
-            <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <ringGeometry args={[0.85, 1.18, 40]} />
-              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.4} transparent opacity={0.35} />
-            </mesh>
-            <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <ringGeometry args={[1.35, 1.46, 48]} />
-              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.1} transparent opacity={0.12} />
-            </mesh>
+            <HubGround role={role as keyof typeof ROLE_HUBS} color={color} />
             <HubMonument role={role as keyof typeof ROLE_HUBS} color={color} />
             <Html position={[0, 1.08, 0]} center zIndexRange={WORLD_TAG_Z_INDEX_RANGE}>
               <div className="world-tag world-tag-hub">
