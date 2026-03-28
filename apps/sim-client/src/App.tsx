@@ -70,6 +70,8 @@ export default function App() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [startHereOpen, setStartHereOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [submitJobOpen, setSubmitJobOpen] = useState(false);
+  const [plugInAgentOpen, setPlugInAgentOpen] = useState(false);
   const [demoLaunchState, setDemoLaunchState] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [demoLaunchMessage, setDemoLaunchMessage] = useState<string>("");
   const [spotlightMode, setSpotlightMode] = useState(false);
@@ -404,6 +406,14 @@ export default function App() {
             <div className="scene-canvas-shell">
               <WorldScene snapshot={snapshot} selectedAgentId={selectedAgentId} followAgentId={followAgentId} focusNonce={focusNonce} />
             </div>
+            <div className="scene-action-dock">
+              <button type="button" className="scene-action-button scene-action-button-primary" onClick={() => setSubmitJobOpen(true)}>
+                Submit Job
+              </button>
+              <button type="button" className="scene-action-button" onClick={() => setPlugInAgentOpen(true)}>
+                Plug In Your Agent
+              </button>
+            </div>
             <div className={`scene-chat-overlay ${spotlightMode ? "spotlight-panel" : ""}`}>
               <div className="scene-chat-head">
                 <h2>Live Handoffs</h2>
@@ -498,9 +508,6 @@ export default function App() {
               ))}
             </div>
           </section>
-
-          <SubmitJobCard httpBase={httpBase} />
-          <PlugInAgentCard httpBase={httpBase} />
 
           <button type="button" className="advanced-toggle" onClick={() => setAdvancedOpen((current) => !current)}>
             {advancedOpen ? "Hide System Details" : "Show System Details"}
@@ -673,6 +680,24 @@ export default function App() {
               </button>
             </div>
           </section>
+        </div>
+      ) : null}
+
+      {submitJobOpen ? (
+        <div className="guide-modal-shell" role="presentation">
+          <div className="guide-modal-backdrop" onClick={() => setSubmitJobOpen(false)} />
+          <div className="action-modal-shell">
+            <SubmitJobCard httpBase={httpBase} onClose={() => setSubmitJobOpen(false)} />
+          </div>
+        </div>
+      ) : null}
+
+      {plugInAgentOpen ? (
+        <div className="guide-modal-shell" role="presentation">
+          <div className="guide-modal-backdrop" onClick={() => setPlugInAgentOpen(false)} />
+          <div className="action-modal-shell">
+            <PlugInAgentCard httpBase={httpBase} onClose={() => setPlugInAgentOpen(false)} />
+          </div>
         </div>
       ) : null}
     </div>

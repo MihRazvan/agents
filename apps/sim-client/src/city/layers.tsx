@@ -5,6 +5,8 @@ import * as THREE from "three";
 import { AGENT_COLORS, DISTRICT_THEME_PURPOSE, JOB_ROUTING, ROLE_HUBS, type Job, type PluginAgentRecord, type Vec2, type WorldSnapshot } from "@trust-city/shared";
 import { ROAD_MINOR_SPACING, type CityStructure, type RoadLine } from "./generator";
 
+const WORLD_TAG_Z_INDEX_RANGE: [number, number] = [40, 0];
+
 function toWorldPoint(position: Vec2, y = 0.72): [number, number, number] {
   return [position.x, y, position.y];
 }
@@ -144,7 +146,7 @@ export function DistrictOverlay({ snapshot, selectedAgentId }: { snapshot: World
               <ringGeometry args={[district.radius - 0.14, district.radius, 64]} />
               <meshStandardMaterial color={hue} emissive={hue} emissiveIntensity={0.65} transparent opacity={isSelectedHome ? 0.4 : 0.14} />
             </mesh>
-            <Html position={[0, 0.24, district.radius + 0.86]} center>
+            <Html position={[0, 0.24, district.radius + 0.86]} center zIndexRange={WORLD_TAG_Z_INDEX_RANGE}>
               <div className={`world-tag world-tag-district ${isSelectedHome ? "world-tag-district-active" : ""}`}>
                 <p>{district.name}</p>
                 <span>{isSelectedHome ? semantics.purpose : `${JOB_ROUTING[semantics.preferredCategories[0]].label} zone`}</span>
@@ -175,7 +177,7 @@ export function RoleHubLandmarks() {
               <cylinderGeometry args={[0.08, 0.14, 0.62, 12]} />
               <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.8} metalness={0.2} roughness={0.3} />
             </mesh>
-            <Html position={[0, 1.08, 0]} center>
+            <Html position={[0, 1.08, 0]} center zIndexRange={WORLD_TAG_Z_INDEX_RANGE}>
               <div className="world-tag world-tag-hub">
                 <p>{hub.name}</p>
               </div>
@@ -184,7 +186,7 @@ export function RoleHubLandmarks() {
         );
       })}
       {spinePoints.length > 1 ? <Line points={spinePoints} color="#6dc8ff" lineWidth={2} transparent opacity={0.42} /> : null}
-      <Html position={[24, 0.32, -18]} center>
+      <Html position={[24, 0.32, -18]} center zIndexRange={WORLD_TAG_Z_INDEX_RANGE}>
         <div className="world-tag world-tag-spine">
           <p>Marketplace Spine</p>
         </div>
@@ -203,7 +205,7 @@ export function PluginRegistryBoard({ plugins }: { plugins: PluginAgentRecord[] 
         <boxGeometry args={[3.2, 1.5, 0.18]} />
         <meshStandardMaterial color="#0d1c30" emissive="#163555" emissiveIntensity={0.34} metalness={0.2} roughness={0.45} />
       </mesh>
-      <Html position={[0, 1.68, 0]} center>
+      <Html position={[0, 1.68, 0]} center zIndexRange={WORLD_TAG_Z_INDEX_RANGE}>
         <div className="world-tag world-tag-plugin">
           <p>Plugin Registry</p>
           <span>{`${active.length} active | ${rejected.length} rejected`}</span>
@@ -306,7 +308,7 @@ export function JobBeacon({ job }: { job: Job }) {
         <torusGeometry args={[0.82, 0.03, 8, 28]} />
         <meshStandardMaterial color={tone} emissive={tone} emissiveIntensity={0.8} transparent opacity={0.85} />
       </mesh>
-      <Html position={[0, 1.05, 0]} center>
+      <Html position={[0, 1.05, 0]} center zIndexRange={WORLD_TAG_Z_INDEX_RANGE}>
         <div className="world-tag world-tag-job">
           <p>{job.title}</p>
           <span>{`${routing.label} | ${job.status.replace(/_/g, " ")}`}</span>

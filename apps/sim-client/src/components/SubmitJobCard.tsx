@@ -97,8 +97,7 @@ function presetFor(category: JobCategory) {
   return jobPresets[category];
 }
 
-function SubmitJobCard({ httpBase }: { httpBase: string }) {
-  const [open, setOpen] = useState(false);
+function SubmitJobCard({ httpBase, onClose }: { httpBase: string; onClose?: () => void }) {
   const [category, setCategory] = useState<JobCategory>("github_bugfix");
   const [title, setTitle] = useState(jobPresets.github_bugfix.title);
   const [summary, setSummary] = useState(jobPresets.github_bugfix.summary);
@@ -157,6 +156,7 @@ function SubmitJobCard({ httpBase }: { httpBase: string }) {
         status: "success",
         message: `${payload.job?.title ?? title} is now in the city.`
       });
+      onClose?.();
     } catch (error) {
       setSubmitState({
         status: "error",
@@ -166,15 +166,17 @@ function SubmitJobCard({ httpBase }: { httpBase: string }) {
   }
 
   return (
-    <section className="card submit-card">
+    <section className="modal-form-card">
       <div className="section-head">
         <h2>Submit Job</h2>
-        <button type="button" className="section-toggle" onClick={() => setOpen((current) => !current)}>
-          {open ? "Hide" : "Open"}
-        </button>
+        {onClose ? (
+          <button type="button" className="section-toggle" onClick={onClose}>
+            Close
+          </button>
+        ) : null}
       </div>
-      {!open ? <p className="section-note">Inject a live task into the city when you need it.</p> : null}
-      {open ? <form className="job-form" onSubmit={submitJob}>
+      <p className="section-note">Inject a live task into the city when you need it.</p>
+      <form className="job-form" onSubmit={submitJob}>
         <label className="job-form-field">
           <span>Category</span>
           <select value={category} onChange={(event) => applyCategory(event.target.value as JobCategory)}>
@@ -221,7 +223,7 @@ function SubmitJobCard({ httpBase }: { httpBase: string }) {
         </div>
 
         {submitState.message ? <p className={`job-form-status job-form-status-${submitState.status}`}>{submitState.message}</p> : null}
-      </form> : null}
+      </form>
     </section>
   );
 }

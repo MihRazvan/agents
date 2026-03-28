@@ -52,8 +52,7 @@ function splitList(value: string): string[] {
     .filter(Boolean);
 }
 
-function PlugInAgentCard({ httpBase }: { httpBase: string }) {
-  const [open, setOpen] = useState(false);
+function PlugInAgentCard({ httpBase, onClose }: { httpBase: string; onClose?: () => void }) {
   const [presetKey, setPresetKey] = useState<PresetKey>("github_fixer");
   const [agentName, setAgentName] = useState<string>(agentPresets.github_fixer.name);
   const [summary, setSummary] = useState<string>(agentPresets.github_fixer.summary);
@@ -133,6 +132,7 @@ function PlugInAgentCard({ httpBase }: { httpBase: string }) {
         status: "success",
         message: `${payload.plugin?.label ?? agentName} was submitted and is now ${payload.plugin?.status ?? "pending"}.`
       });
+      onClose?.();
     } catch (error) {
       setSubmitState({
         status: "error",
@@ -142,16 +142,17 @@ function PlugInAgentCard({ httpBase }: { httpBase: string }) {
   }
 
   return (
-    <section className="card submit-card">
+    <section className="modal-form-card">
       <div className="section-head">
         <h2>Plug In Your Agent</h2>
-        <button type="button" className="section-toggle" onClick={() => setOpen((current) => !current)}>
-          {open ? "Hide" : "Open"}
-        </button>
+        {onClose ? (
+          <button type="button" className="section-toggle" onClick={onClose}>
+            Close
+          </button>
+        ) : null}
       </div>
-      {!open ? <p className="section-note">Register a specialist agent so the city can route jobs to it.</p> : null}
-      {open ? (
-        <form className="job-form" onSubmit={submitPlugin}>
+      <p className="section-note">Register a specialist agent so the city can route jobs to it.</p>
+      <form className="job-form" onSubmit={submitPlugin}>
           <label className="job-form-field">
             <span>Preset</span>
             <select value={presetKey} onChange={(event) => applyPreset(event.target.value as PresetKey)}>
@@ -232,7 +233,6 @@ function PlugInAgentCard({ httpBase }: { httpBase: string }) {
 
           {submitState.message ? <p className={`job-form-status job-form-status-${submitState.status}`}>{submitState.message}</p> : null}
         </form>
-      ) : null}
     </section>
   );
 }

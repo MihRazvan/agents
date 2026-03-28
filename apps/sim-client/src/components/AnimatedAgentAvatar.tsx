@@ -29,6 +29,7 @@ function worldPoint(position: { x: number; y: number }, y = 0.92): [number, numb
 const POSITION_DAMP = 8.8;
 const ROTATION_DAMP = 11.5;
 const MODEL_FORWARD_OFFSET = 0;
+const WORLD_TAG_Z_INDEX_RANGE: [number, number] = [40, 0];
 const MOVEMENT_CLIP_THRESHOLD = 0.06;
 const MOVEMENT_START_THRESHOLD = 0.085;
 const MOVEMENT_STOP_THRESHOLD = 0.03;
@@ -207,7 +208,7 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
       </Text>
 
       {chat ? (
-        <Html position={[0, 2.45, 0]} center distanceFactor={8}>
+        <Html position={[0, 2.45, 0]} center distanceFactor={8} zIndexRange={WORLD_TAG_Z_INDEX_RANGE}>
           <div className={`world-tag world-tag-chat ${chat.tone === "warning" ? "world-tag-chat-warning" : "world-tag-chat-decision"}`}>
             <p>{chat.recipientName ? `${chat.actorName} -> ${chat.recipientName}` : chat.actorName}</p>
             <span>{chat.message}</span>
