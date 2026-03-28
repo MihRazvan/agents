@@ -1,27 +1,23 @@
-# Trust City Autonomous Ops
+# Trust City Exchange
 
-A vertical-slice implementation of a trust-gated autonomous multi-agent system with a live 3D simulation view.
+Trust City Exchange is a trust-gated autonomous job marketplace visualized as a live 3D city.
 
-## What is implemented
+Jobs enter the city, specialized agents discover and claim them, trusted agents collaborate to complete them, and the system publishes verifiable ERC-8004 receipts where possible.
 
-- Autonomous decision loop in orchestrator: `discover -> plan -> execute -> verify -> submit`.
-- Multi-agent roles: scout, planner, builder(s), verifier, publisher.
-- Trust-gated handoffs using a policy threshold.
-- Structured execution logs written continuously to `agent_log.json`.
-- DevSpot-style capability manifest written to `agent.json`.
-- Simulated ERC-8004 receipts (tx-hash-like outputs) for identity/validation/reputation events.
-- Live websocket stream into a 3D city scene with moving agents, incident beacons, trails, and receipt monuments.
-- Seeded procedural districts and A*-style route planning for agent movement.
-- Visual trust/task overlays: trust aura rings plus live handoff beams from agents to incidents.
-- Cinematic camera direction that auto-focuses high-priority incident activity.
-- Reactive world ambiance (district overlays, traffic motion, stronger post-processing pipeline).
-- Real skinned GLB avatars (`RobotExpressive.glb`) with clip-driven phase animation (`Idle`, `Walking`, `Running`) and smooth transitions.
+## What it does
+
+- Runs a full agent workflow: `discover -> plan -> execute -> verify -> submit`
+- Visualizes the workflow in a 3D city with live movement, chat, and camera follow
+- Routes jobs using trust, skills, tools, and availability
+- Supports plugin agents joining the city through a manifest
+- Exports `agent.json` and `agent_log.json` for hackathon compatibility
+- Writes real ERC-8004 identity and reputation receipts on Ethereum Sepolia
 
 ## Monorepo layout
 
-- `apps/orchestrator`: backend autonomous runtime + websocket stream.
-- `apps/sim-client`: React + Three.js live visualization.
-- `packages/shared`: shared runtime types/constants.
+- `apps/orchestrator`: autonomous runtime, APIs, WebSocket stream, onchain integration
+- `apps/sim-client`: React + Three.js visualization client
+- `packages/shared`: shared domain types and constants
 
 ## Quick start
 
@@ -33,15 +29,58 @@ npm run dev
 Services:
 
 - Orchestrator API: `http://localhost:8787`
-- Websocket stream: `ws://localhost:8787/ws`
+- WebSocket stream: `ws://localhost:8787/ws`
 - 3D client: `http://localhost:5173`
 
 ## Useful endpoints
 
 - `GET /health`
 - `GET /state`
+- `GET /jobs`
+- `GET /plugins`
+- `GET /onchain`
 - `GET /agent.json`
 - `GET /agent_log.json`
+- `POST /jobs`
+
+## Environment
+
+Copy `.env.example` to `.env` and configure:
+
+- `OPERATOR_PRIVATE_KEY`
+- `OPERATOR_WALLET`
+- `FEEDBACK_CLIENT_PRIVATE_KEY`
+- `FEEDBACK_CLIENT_WALLET`
+- `SEPOLIA_RPC_URL`
+
+The operator wallet owns the city agent identity. The feedback wallet is used for ERC-8004 reputation writes, because self-feedback is rejected by the reputation registry.
+
+Optional GitHub hero-lane vars:
+
+- `GITHUB_OWNER`
+- `GITHUB_REPO`
+- `GITHUB_ISSUE_NUMBER`
+- `GITHUB_TOKEN`
+
+When these are set, the GitHub bugfix lane fetches a real issue from the GitHub API and includes that payload in the execution bundle. When they are not set, the lane still runs against the built-in demo issue queue.
+
+## Onchain status
+
+Currently implemented:
+
+- Identity registration: live on Sepolia
+- Reputation receipts: live on Sepolia
+- Validation probing: implemented, but direct public Sepolia validation writes are rejected without an authorized verifier flow
+
+## Roadmap
+
+The active build plan is in [ROADMAP.md](./ROADMAP.md).
+
+Current priority:
+
+1. Make routing and guardrails explicit in the live UI
+2. Add one clearly real end-to-end job path with real external tools
+3. Route real work to plugin agents through a simple adapter flow
 
 ## Build
 
@@ -49,12 +88,25 @@ Services:
 npm run build
 ```
 
-## Environment variables
+## Submit a job manually
 
-- `ORCHESTRATOR_PORT` (default: `8787`)
-- `OPERATOR_WALLET` (default provided for local demo)
-- `AGENT_ERC8004_ID` (default provided for local demo)
+You can inject a new marketplace job directly into the city:
 
-## Current limitation
+```bash
+curl -X POST http://localhost:8787/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Patch wallet connect regression",
+    "summary": "Investigate the wallet banner regression and produce a tested remediation patch.",
+    "category": "github_bugfix",
+    "priority": "priority",
+    "source": "github",
+    "submitter": "Operator Console",
+    "requestedSkills": ["TypeScript", "debugging", "tests"],
+    "requiredTools": ["github_api", "git", "test_runner"],
+    "requiredTrust": 0.74,
+    "deliverable": "Patch artifact with test evidence"
+  }'
+```
 
-ERC-8004 writes are currently simulated with deterministic tx-hash-style receipts for local development. The next step is wiring real contract calls on the target network used by the bounty.
+This job will be routed through the same city workflow as the seeded jobs.
