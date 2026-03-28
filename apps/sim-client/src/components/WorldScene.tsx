@@ -27,6 +27,8 @@ const FOLLOW_TARGET_LAG = 5.4;
 const FOLLOW_CAMERA_LAG = 2.2;
 const FOLLOW_COLLISION_BUFFER = 2.2;
 const FOLLOW_MIN_DISTANCE = 5.8;
+const MIDNIGHT_BACKGROUND = "#050811";
+const MIDNIGHT_FOG = "#08101b";
 
 function toPathPoint(position: Vec2): [number, number, number] {
   return [position.x, 0.35, position.y];
@@ -374,6 +376,84 @@ function recentVisibleChats(chats: ChatMessage[]): ChatMessage[] {
   return chats.filter((chat) => new Date(chat.timestamp).getTime() >= cutoff);
 }
 
+function ExchangeBackdrop({ center }: { center: Vec2 }) {
+  const skyline = useMemo(() => {
+    return Array.from({ length: 36 }).map((_, index) => {
+      const angle = (index / 36) * Math.PI * 2;
+      const radius = 148 + (index % 6) * 12;
+      const width = 4 + (index % 4) * 1.2;
+      const depth = 4.5 + ((index + 2) % 5) * 1.1;
+      const height = 18 + (index % 7) * 7 + ((index * 13) % 5);
+      const x = center.x + Math.cos(angle) * radius;
+      const z = center.y + Math.sin(angle) * radius;
+      const hue = index % 3 === 0 ? "#13233b" : index % 3 === 1 ? "#1a2030" : "#17283a";
+      const beacon = index % 4 === 0;
+      return { x, z, width, depth, height, hue, beacon };
+    });
+  }, [center.x, center.y]);
+
+  return (
+    <group>
+      {skyline.map((tower, index) => (
+        <group key={`${tower.x}-${tower.z}-${index}`} position={[tower.x, 0, tower.z]}>
+          <mesh position={[0, tower.height / 2, 0]}>
+            <boxGeometry args={[tower.width, tower.height, tower.depth]} />
+            <meshStandardMaterial color={tower.hue} emissive={tower.hue} emissiveIntensity={0.18} roughness={0.62} metalness={0.22} />
+          </mesh>
+          <mesh position={[0, 0.08, 0]}>
+            <cylinderGeometry args={[tower.width * 0.58, tower.width * 0.66, 0.16, 16]} />
+            <meshStandardMaterial color="#102131" emissive="#17354f" emissiveIntensity={0.2} roughness={0.78} />
+          </mesh>
+          {tower.beacon ? (
+            <>
+              <mesh position={[0, tower.height + 1.4, 0]}>
+                <boxGeometry args={[0.34, 2.8, 0.34]} />
+                <meshStandardMaterial color="#67dcff" emissive="#67dcff" emissiveIntensity={1.35} transparent opacity={0.88} />
+              </mesh>
+              <mesh position={[0, tower.height + 0.24, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                <ringGeometry args={[1.2, 1.5, 28]} />
+                <meshStandardMaterial color="#67dcff" emissive="#67dcff" emissiveIntensity={0.8} transparent opacity={0.18} />
+              </mesh>
+            </>
+          ) : null}
+        </group>
+      ))}
+    </group>
+  );
+}
+
+function ExchangeFloor({ center }: { center: Vec2 }) {
+  return (
+    <group position={[center.x, 0, center.y]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <circleGeometry args={[132, 96]} />
+        <meshStandardMaterial color="#0d1521" emissive="#0b1521" emissiveIntensity={0.18} roughness={0.96} metalness={0.08} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+        <ringGeometry args={[74, 75.6, 72]} />
+        <meshStandardMaterial color="#64c9ff" emissive="#64c9ff" emissiveIntensity={1.2} transparent opacity={0.16} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+        <ringGeometry args={[118, 119.2, 96]} />
+        <meshStandardMaterial color="#ffb66b" emissive="#ffb66b" emissiveIntensity={0.82} transparent opacity={0.08} />
+      </mesh>
+    </group>
+  );
+}
+
+function ExchangeAurora({ center }: { center: Vec2 }) {
+  const ribbon = useMemo<Array<[number, number, number]>>(
+    () =>
+      Array.from({ length: 18 }).map((_, index) => {
+        const t = index / 17;
+        return [center.x - 120 + t * 240, 44 + Math.sin(t * Math.PI * 1.4) * 8, center.y - 128 + Math.cos(t * Math.PI * 1.7) * 18];
+      }),
+    [center.x, center.y]
+  );
+
+  return <Line points={ribbon} color="#4fd2ff" lineWidth={2.4} transparent opacity={0.12} />;
+}
+
 export default function WorldScene({ snapshot, selectedAgentId, followAgentId, focusNonce = 0 }: Props) {
   const focusPoint = useMemo(() => getFocusPoint(snapshot, followAgentId), [snapshot, followAgentId]);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
@@ -452,27 +532,34 @@ export default function WorldScene({ snapshot, selectedAgentId, followAgentId, f
       camera={{ position: [36, 24, 34], fov: 48 }}
       gl={{ antialias: true, powerPreference: "high-performance" }}
     >
-      <color attach="background" args={["#080b15"]} />
-      <fog attach="fog" args={["#080b15", 80, 360]} />
+      <color attach="background" args={[MIDNIGHT_BACKGROUND]} />
+      <fog attach="fog" args={[MIDNIGHT_FOG, 52, 290]} />
 
-      <ambientLight intensity={0.44} color="#8ea9ff" />
+      <ambientLight intensity={0.22} color="#7ca9ff" />
+      <hemisphereLight args={["#7eb7ff", "#061018", 0.58]} />
       <directionalLight
-        position={[14, 24, 10]}
-        intensity={1.42}
-        color="#d3e3ff"
+        position={[-32, 18, -20]}
+        intensity={1.5}
+        color="#ffc98c"
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
       />
-      <spotLight position={[-14, 18, -8]} intensity={120} distance={120} angle={0.33} penumbra={0.7} color="#4ad8ff" />
+      <directionalLight position={[40, 42, 22]} intensity={0.56} color="#73c7ff" />
+      <spotLight position={[-14, 18, -8]} intensity={130} distance={140} angle={0.36} penumbra={0.8} color="#3fd6ff" />
+      <pointLight position={[24, 14, -24]} intensity={28} distance={140} color="#ff9f5a" />
+      <pointLight position={[-36, 16, 28]} intensity={22} distance={128} color="#57cfff" />
 
-      <Sky distance={1800} sunPosition={[110, 40, 70]} turbidity={8} rayleigh={0.4} mieCoefficient={0.004} mieDirectionalG={0.9} />
-      <Stars radius={220} depth={120} count={7000} factor={4.5} fade saturation={0} speed={1.1} />
+      <Sky distance={1800} sunPosition={[-90, 8, -60]} turbidity={12} rayleigh={0.9} mieCoefficient={0.012} mieDirectionalG={0.92} />
+      <Stars radius={240} depth={140} count={8200} factor={4.8} fade saturation={0} speed={0.8} />
+      <ExchangeAurora center={streamAnchor} />
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[streamAnchor.x, 0, streamAnchor.y]}>
         <planeGeometry args={[960, 960, 1, 1]} />
-        <meshStandardMaterial color="#151b26" metalness={0.08} roughness={0.95} />
+        <meshStandardMaterial color="#0a0f18" emissive="#09111d" emissiveIntensity={0.12} metalness={0.06} roughness={0.98} />
       </mesh>
+      <ExchangeFloor center={streamAnchor} />
+      <ExchangeBackdrop center={streamAnchor} />
 
       <DynamicRoads roads={streamedCity.roads} />
       <TrafficLanes center={streamAnchor} />
@@ -592,9 +679,9 @@ export default function WorldScene({ snapshot, selectedAgentId, followAgentId, f
       />
 
       <EffectComposer>
-        <Bloom intensity={1.16} luminanceThreshold={0.2} luminanceSmoothing={0.58} mipmapBlur />
-        <Noise opacity={0.03} />
-        <Vignette offset={0.15} darkness={0.62} eskil={false} />
+        <Bloom intensity={1.5} luminanceThreshold={0.14} luminanceSmoothing={0.72} mipmapBlur />
+        <Noise opacity={0.018} />
+        <Vignette offset={0.2} darkness={0.7} eskil={false} />
       </EffectComposer>
     </Canvas>
   );
