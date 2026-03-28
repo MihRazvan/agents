@@ -41,6 +41,7 @@ loadEnv({ path: path.join(rootDir, ".env") });
 
 const HTTP_PORT = Number(process.env.ORCHESTRATOR_PORT ?? "8787");
 const LOOP_INTERVAL_MS = 400;
+const MOVEMENT_INTERVAL_MS = 100;
 const WORLD_SEED = Number(process.env.WORLD_SEED ?? "271828");
 
 const operatorWallet = process.env.OPERATOR_WALLET ?? "0xD3aDbeefD3aDbeefD3aDbeefD3aDbeefD3aDbeef";
@@ -1166,7 +1167,9 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
   workflow.activeAgentId = undefined;
 }
 
-function tickMovement(): void {
+function tickMovement(stepScale = 1): boolean {
+  let moved = false;
+
   for (const agent of agents) {
     if (agent.path.length === 0) {
       agent.energy = Math.max(0.2, Math.min(1, agent.energy + (agent.phase === "idle" ? 0.008 : -0.002)));
@@ -1174,23 +1177,45 @@ function tickMovement(): void {
     }
 
     const waypoint = agent.path[0];
+    const nextWaypoint = agent.path[1];
     agent.target = waypoint;
 
     const dx = waypoint.x - agent.position.x;
     const dy = waypoint.y - agent.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
+    const step = agent.speed * stepScale;
 
-    if (dist <= agent.speed) {
+    if (dist <= Math.max(step * 1.05, 0.08)) {
       agent.position.x = waypoint.x;
       agent.position.y = waypoint.y;
       agent.path.shift();
+      agent.target = agent.path[0] ?? waypoint;
+      moved = true;
     } else if (dist > 0.0001) {
-      agent.position.x += (dx / dist) * agent.speed;
-      agent.position.y += (dy / dist) * agent.speed;
+      let targetX = waypoint.x;
+      let targetY = waypoint.y;
+
+      if (nextWaypoint && dist < 1.2) {
+        const cornerBlend = Math.min(0.58, (1.2 - dist) / 1.2);
+        targetX += (nextWaypoint.x - waypoint.x) * cornerBlend;
+        targetY += (nextWaypoint.y - waypoint.y) * cornerBlend;
+      }
+
+      const steerX = targetX - agent.position.x;
+      const steerY = targetY - agent.position.y;
+      const steerDist = Math.sqrt(steerX * steerX + steerY * steerY);
+
+      if (steerDist > 0.0001) {
+        agent.position.x += (steerX / steerDist) * step;
+        agent.position.y += (steerY / steerDist) * step;
+        moved = true;
+      }
     }
 
     agent.energy = Math.max(0.2, Math.min(1, agent.energy + (agent.phase === "idle" ? 0.008 : -0.005)));
   }
+
+  return moved;
 }
 
 function pickDistrictForCategory(category: JobCategory): District {
@@ -1518,7 +1543,6 @@ function mainLoop(): void {
 
   runtimeGuardrails();
   processJobs();
-  tickMovement();
 
   const snapshot = getSnapshot();
   broadcast({ type: "world_snapshot", payload: snapshot });
@@ -1533,6 +1557,15 @@ function mainLoop(): void {
       focus: cinematicFocus
     });
   }
+}
+
+function movementLoop(): void {
+  const moved = tickMovement(MOVEMENT_INTERVAL_MS / LOOP_INTERVAL_MS);
+  if (!moved) {
+    return;
+  }
+
+  broadcast({ type: "world_snapshot", payload: getSnapshot() });
 }
 
 app.get("/health", (_req, res) => {
@@ -1629,4 +1662,5 @@ server.listen(HTTP_PORT, async () => {
   });
   addChat("system", "System", "Trust City Exchange online. Waiting for jobs and plugin agents.", "decision", { kind: "status" });
   setInterval(mainLoop, LOOP_INTERVAL_MS);
+  setInterval(movementLoop, MOVEMENT_INTERVAL_MS);
 });

@@ -4,6 +4,7 @@ import {
   ROLE_HUBS,
   type AgentManifest,
   type ChatMessage,
+  type Job,
   type LogEntry,
   type OnchainStatus,
   type PluginAgentRecord,
@@ -35,6 +36,25 @@ function formatStatus(status: string): string {
 
 function formatRisk(risk: string): string {
   return risk.charAt(0).toUpperCase() + risk.slice(1);
+}
+
+const OPEN_JOB_STATUS_ORDER = {
+  queued: 0,
+  negotiating: 1,
+  in_progress: 2,
+  verifying: 3,
+  failed: 4,
+  completed: 5
+} as const;
+
+function truncateCopy(value: string | undefined, max = 180): string | null {
+  if (!value) {
+    return null;
+  }
+  if (value.length <= max) {
+    return value;
+  }
+  return `${value.slice(0, max - 1).trimEnd()}…`;
 }
 
 export default function App() {
@@ -160,6 +180,23 @@ export default function App() {
     };
   }, [plugins]);
 
+  const openJobs = useMemo(
+    () =>
+      [...(snapshot?.jobs ?? [])]
+        .filter((job) => job.status !== "completed" && job.status !== "failed")
+        .sort((left, right) => OPEN_JOB_STATUS_ORDER[left.status] - OPEN_JOB_STATUS_ORDER[right.status]),
+    [snapshot?.jobs]
+  );
+
+  const jobHistory = useMemo(
+    () =>
+      [...(snapshot?.jobs ?? [])]
+        .filter((job) => job.status === "completed" || job.status === "failed")
+        .reverse()
+        .slice(0, 8),
+    [snapshot?.jobs]
+  );
+
   const onchainStatus: OnchainStatus | null = snapshot?.onchainStatus ?? null;
   const recentChats = useMemo(() => [...(snapshot?.chats ?? [])].slice(-18).reverse(), [snapshot?.chats]);
   const selectedAgent = useMemo(() => (snapshot?.agents ?? []).find((agent) => agent.id === selectedAgentId) ?? null, [snapshot?.agents, selectedAgentId]);
@@ -174,16 +211,68 @@ export default function App() {
     return chat.recipientName ? `${chat.actorName} -> ${chat.recipientName}` : chat.actorName;
   }
 
+  function renderJobCard(job: Job, mode: "open" | "history") {
+    const category = JOB_ROUTING[job.category];
+    const routingCopy = truncateCopy(job.routingReason, mode === "open" ? 152 : 132);
+    const guardrailCopy = truncateCopy(job.guardrailSummary, mode === "open" ? 112 : 96);
+    const outputCopy = truncateCopy(job.outputSummary, 124);
+
+    return (
+      <article
+        key={job.id}
+        className={`job-board-item ${
+          job.status === "failed" ? "job-board-item-failed" : job.status === "completed" ? "job-board-item-complete" : "job-board-item-open"
+        }`}
+      >
+        <div className="job-board-topline">
+          <span className={`job-status-pill job-status-pill-${job.status}`}>{formatStatus(job.status)}</span>
+          <span className="job-category-pill">{category.label}</span>
+        </div>
+        <h3>{job.title}</h3>
+        <p className="job-board-meta">
+          {job.submitter} · {formatRisk(job.riskLevel)} risk · {job.activeStageLabel}
+          {job.selectedAgentName ? ` · ${job.selectedAgentName}` : ""}
+        </p>
+        {routingCopy ? <p className="job-board-copy">{routingCopy}</p> : null}
+        {guardrailCopy ? <p className="job-board-subcopy">{guardrailCopy}</p> : null}
+        {job.blockedReason ? <p className="job-board-warning">Blocked: {job.blockedReason}</p> : null}
+        {job.referenceUrl ? <p className="job-board-linkline">Reference: {job.referenceUrl}</p> : null}
+        {job.deliveryTarget ? <p className="job-board-linkline">Destination: {job.deliveryTarget}</p> : null}
+        {mode === "history" && outputCopy ? <p className="job-board-subcopy">Output: {outputCopy}</p> : null}
+        {mode === "history" && job.artifactPath ? <p className="job-board-linkline">Artifacts: {job.artifactPath}</p> : null}
+      </article>
+    );
+  }
+
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div>
-          <p className="overline">Open Autonomous Work Market</p>
-          <h1>Trust City Exchange</h1>
+      <header className="workspace-bar">
+        <div className="workspace-brand">
+          <p className="workspace-kicker">City Operations</p>
+          <h1>Trust City</h1>
+          <p className="workspace-copy">Autonomous work routing, live agent coordination, and trust-aware delivery in one operator view.</p>
         </div>
-        <div className={`status status-${wsStatus}`}>
-          <span className="dot" />
-          <span>{wsStatus === "live" ? "Live stream" : wsStatus === "connecting" ? "Connecting" : "Offline"}</span>
+        <div className="workspace-summary">
+          <div className={`status status-${wsStatus}`}>
+            <span className="dot" />
+            <span>{wsStatus === "live" ? "Connection Live" : wsStatus === "connecting" ? "Connecting" : "Offline"}</span>
+          </div>
+          <div className="summary-chip">
+            <span>Open</span>
+            <strong>{jobStats.live}</strong>
+          </div>
+          <div className="summary-chip">
+            <span>Closed</span>
+            <strong>{jobStats.completed}</strong>
+          </div>
+          <div className="summary-chip">
+            <span>Agents</span>
+            <strong>{snapshot?.agents.length ?? 0}</strong>
+          </div>
+          <div className="summary-chip">
+            <span>Plugins</span>
+            <strong>{pluginCounts.active}</strong>
+          </div>
         </div>
       </header>
 
@@ -211,32 +300,28 @@ export default function App() {
         </section>
 
         <aside className="side-panel">
-          <section className="card metrics-card">
-            <h2>Market Metrics</h2>
-            <div className="metric-row">
-              <div>
-                <p className="metric-label">Tick</p>
-                <p className="metric-value">{snapshot?.tick ?? 0}</p>
-              </div>
-              <div>
-                <p className="metric-label">Live Jobs</p>
-                <p className="metric-value">{jobStats.live}</p>
-              </div>
-              <div>
-                <p className="metric-label">Completed</p>
-                <p className="metric-value">{jobStats.completed}</p>
-              </div>
-              <div>
-                <p className="metric-label">Plugins</p>
-                <p className="metric-value">{pluginCounts.active}</p>
-              </div>
+          <section className="card board-card">
+            <div className="section-head">
+              <h2>Open Jobs</h2>
+              <p className="section-note">
+                {openJobs.length > 0 ? `${openJobs.length} active in the city` : "No active jobs right now"}
+              </p>
             </div>
-            <p className="budget-line">
-              Tool budget: {snapshot?.budget.usedToolCalls ?? 0}/{snapshot?.budget.maxToolCalls ?? 0}
-            </p>
-            <p className="budget-line">
-              Retry budget: {snapshot?.budget.maxRetriesPerJob ?? 0} | Active chats: {snapshot?.chats.length ?? 0}
-            </p>
+            <div className="job-board-list">
+              {openJobs.length > 0 ? openJobs.map((job) => renderJobCard(job, "open")) : <p className="empty-state">New work will appear here as soon as it enters the city.</p>}
+            </div>
+          </section>
+
+          <section className="card board-card">
+            <div className="section-head">
+              <h2>Job History</h2>
+              <p className="section-note">
+                {jobHistory.length > 0 ? "Most recent completed and failed work" : "Completed jobs will accumulate here"}
+              </p>
+            </div>
+            <div className="job-board-list">
+              {jobHistory.length > 0 ? jobHistory.map((job) => renderJobCard(job, "history")) : <p className="empty-state">No finished jobs yet.</p>}
+            </div>
           </section>
 
           <section className="card roster-card">
@@ -272,11 +357,36 @@ export default function App() {
           <PlugInAgentCard httpBase={httpBase} />
 
           <button type="button" className="advanced-toggle" onClick={() => setAdvancedOpen((current) => !current)}>
-            {advancedOpen ? "Hide Advanced" : "Show Advanced"}
+            {advancedOpen ? "Hide System Details" : "Show System Details"}
           </button>
 
           {advancedOpen ? (
             <>
+              <section className="card metrics-card">
+                <h2>Runtime Metrics</h2>
+                <div className="metric-row">
+                  <div>
+                    <p className="metric-label">Tick</p>
+                    <p className="metric-value">{snapshot?.tick ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="metric-label">Tool Calls</p>
+                    <p className="metric-value">{snapshot?.budget.usedToolCalls ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="metric-label">Retry Cap</p>
+                    <p className="metric-value">{snapshot?.budget.maxRetriesPerJob ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="metric-label">Chats</p>
+                    <p className="metric-value">{snapshot?.chats.length ?? 0}</p>
+                  </div>
+                </div>
+                <p className="budget-line">
+                  Tool budget: {snapshot?.budget.usedToolCalls ?? 0}/{snapshot?.budget.maxToolCalls ?? 0}
+                </p>
+              </section>
+
               <section className="card manifest-card">
                 <h2>City Operator</h2>
                 <p className="manifest-item">
@@ -340,34 +450,6 @@ export default function App() {
                   ))}
                 </div>
                 <p className="budget-line">POST {httpBase}/plugins to plug your agent into the city.</p>
-              </section>
-
-              <section className="card manifest-card">
-                <h2>Live Jobs</h2>
-                <div className="feed-list">
-                  {(snapshot?.jobs ?? []).map((job) => (
-                    <div
-                      key={job.id}
-                      className={`job-detail-card ${
-                        job.status === "failed" ? "job-detail-failed" : job.status === "completed" ? "job-detail-complete" : "job-detail-live"
-                      }`}
-                    >
-                      <p className="job-detail-title">
-                        [{formatStatus(job.status)}] {job.title}
-                      </p>
-                      <p className="job-detail-meta">
-                        {JOB_ROUTING[job.category].label} | {job.submitter} | {formatRisk(job.riskLevel)} risk | Stage {job.activeStageLabel}
-                      </p>
-                      <p className="job-detail-copy">{job.routingReason}</p>
-                      <p className="job-detail-copy">{job.guardrailSummary}</p>
-                      {job.referenceUrl ? <p className="job-detail-copy">Reference: {job.referenceUrl}</p> : null}
-                      {job.deliveryTarget ? <p className="job-detail-copy">Destination: {job.deliveryTarget}</p> : null}
-                      {job.blockedReason ? <p className="job-detail-copy job-detail-warning">Blocked: {job.blockedReason}</p> : null}
-                      {job.outputSummary ? <p className="job-detail-copy">Output: {job.outputSummary}</p> : null}
-                      {job.artifactPath ? <p className="job-detail-copy">Artifacts: {job.artifactPath}</p> : null}
-                    </div>
-                  ))}
-                </div>
               </section>
 
               <section className="card receipt-card">

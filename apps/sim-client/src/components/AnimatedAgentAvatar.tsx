@@ -26,6 +26,10 @@ function worldPoint(position: { x: number; y: number }, y = 0.92): [number, numb
   return [position.x, y, position.y];
 }
 
+const POSITION_DAMP = 8.8;
+const ROTATION_DAMP = 11.5;
+const MODEL_FORWARD_OFFSET = 0;
+
 export default function AnimatedAgentAvatar({ agent, job, chat, selected = false }: Props) {
   const rootRef = useRef<THREE.Group>(null);
   const auraRef = useRef<THREE.Mesh>(null);
@@ -64,7 +68,7 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
     const dx = nextWaypoint.x - agent.position.x;
     const dz = nextWaypoint.y - agent.position.y;
     const length = Math.hypot(dx, dz) || 1;
-    const lead = agent.phase === "idle" ? 0 : Math.min(0.45, length * 0.18);
+    const lead = agent.phase === "idle" ? 0 : Math.min(0.72, 0.16 + length * 0.28);
     targetPosRef.current.set(agent.position.x + (dx / length) * lead, 0.92, agent.position.y + (dz / length) * lead);
   }, [agent.position.x, agent.position.y, agent.target.x, agent.target.y, agent.phase, agent.path]);
 
@@ -99,8 +103,8 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
       return;
     }
 
-    const blend = 1 - Math.exp(-delta * 6.2);
-    currentPosRef.current.lerp(targetPosRef.current, blend);
+    currentPosRef.current.x = THREE.MathUtils.damp(currentPosRef.current.x, targetPosRef.current.x, POSITION_DAMP, delta);
+    currentPosRef.current.z = THREE.MathUtils.damp(currentPosRef.current.z, targetPosRef.current.z, POSITION_DAMP, delta);
     rootRef.current.position.x = currentPosRef.current.x;
     rootRef.current.position.z = currentPosRef.current.z;
 
@@ -119,7 +123,7 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
       }
     }
 
-    rootRef.current.rotation.y = THREE.MathUtils.damp(rootRef.current.rotation.y, headingRef.current + Math.PI, 7.5, delta);
+    rootRef.current.rotation.y = THREE.MathUtils.damp(rootRef.current.rotation.y, headingRef.current + MODEL_FORWARD_OFFSET, ROTATION_DAMP, delta);
     rootRef.current.position.y = 0.92 + Math.sin(clock.getElapsedTime() * 4.8 + currentPosRef.current.x) * 0.03;
     previousPosRef.current.copy(currentPosRef.current);
 
