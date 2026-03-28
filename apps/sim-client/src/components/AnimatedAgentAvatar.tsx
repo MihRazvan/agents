@@ -29,10 +29,14 @@ function worldPoint(position: { x: number; y: number }, y = 0.92): [number, numb
 const POSITION_DAMP = 8.8;
 const ROTATION_DAMP = 11.5;
 const MODEL_FORWARD_OFFSET = 0;
-const MOVEMENT_CLIP_THRESHOLD = 0.16;
+const MOVEMENT_CLIP_THRESHOLD = 0.06;
+const MOVEMENT_START_THRESHOLD = 0.085;
+const MOVEMENT_STOP_THRESHOLD = 0.03;
+const INTERPOLATION_START_DISTANCE = 0.055;
+const INTERPOLATION_STOP_DISTANCE = 0.018;
+const ROUTE_ACTIVE_DISTANCE = 0.08;
 
-function desiredClipForAgent(agent: AgentRuntimeState, speed: number): string {
-  const moving = speed > MOVEMENT_CLIP_THRESHOLD || agent.path.length > 0;
+function desiredClipForAgent(agent: AgentRuntimeState, moving: boolean): string {
   if (moving) {
     return agent.phase === "execute" || agent.phase === "submit" ? "Running" : "Walking";
   }
@@ -48,6 +52,7 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
   const targetPosRef = useRef(new THREE.Vector3(agent.position.x, 0.92, agent.position.y));
   const previousPosRef = useRef(new THREE.Vector3(agent.position.x, 0.92, agent.position.y));
   const speedRef = useRef(0);
+  const movingIntentRef = useRef(agent.path.length > 0);
 
   const { scene, animations } = useGLTF("/assets/characters/RobotExpressive.glb");
 
@@ -99,12 +104,31 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
     const moveDz = currentPosRef.current.z - previousPosRef.current.z;
     const frameDistance = Math.sqrt(moveDx * moveDx + moveDz * moveDz);
     speedRef.current = THREE.MathUtils.damp(speedRef.current, frameDistance / Math.max(delta, 1e-4), 9, delta);
+    const interpolationDistance = currentPosRef.current.distanceTo(targetPosRef.current);
+    const routeDistance = Math.hypot(agent.target.x - agent.position.x, agent.target.y - agent.position.y);
+    const hasRoute = agent.path.length > 0 || routeDistance > ROUTE_ACTIVE_DISTANCE;
+
+    if (movingIntentRef.current) {
+      if (
+        speedRef.current < MOVEMENT_STOP_THRESHOLD &&
+        interpolationDistance < INTERPOLATION_STOP_DISTANCE &&
+        !hasRoute
+      ) {
+        movingIntentRef.current = false;
+      }
+    } else if (
+      speedRef.current > MOVEMENT_START_THRESHOLD ||
+      interpolationDistance > INTERPOLATION_START_DISTANCE ||
+      hasRoute
+    ) {
+      movingIntentRef.current = true;
+    }
 
     if (frameDistance > 0.0008) {
       headingRef.current = Math.atan2(moveDx, moveDz);
     }
 
-    const desiredClip = desiredClipForAgent(agent, speedRef.current);
+    const desiredClip = desiredClipForAgent(agent, movingIntentRef.current || speedRef.current > MOVEMENT_CLIP_THRESHOLD);
     if (clipRef.current !== desiredClip) {
       const nextAction = actions[desiredClip] ?? actions.Idle;
       const previousAction = actions[clipRef.current];
@@ -120,7 +144,13 @@ export default function AnimatedAgentAvatar({ agent, job, chat, selected = false
     const active = actions[clipRef.current] ?? actions.Idle;
     if (active) {
       const speedNorm = THREE.MathUtils.clamp(speedRef.current / 2.2, 0, 1.7);
-      active.timeScale = agent.phase === "execute" ? 1.05 + speedNorm * 0.55 : 0.8 + speedNorm * 0.45;
+      if (clipRef.current === "Running") {
+        active.timeScale = 1.08 + Math.max(speedNorm, 0.32) * 0.58;
+      } else if (clipRef.current === "Walking") {
+        active.timeScale = 0.88 + Math.max(speedNorm, 0.24) * 0.42;
+      } else {
+        active.timeScale = 1;
+      }
       active.weight = 1;
     }
 
