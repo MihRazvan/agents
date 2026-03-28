@@ -535,12 +535,6 @@ export default function WorldScene({ snapshot, selectedAgentId, followAgentId, f
         );
       })}
 
-      {selectedAgent ? (
-        <Text position={[selectedAgent.position.x, 5.4, selectedAgent.position.y]} fontSize={0.28} color="#f4fbff" anchorX="center" anchorY="middle">
-          {selectedAgent.name}
-        </Text>
-      ) : null}
-
       {Object.entries(trailMap).map(([agentId, points]) => {
         if (points.length < 2) {
           return null;
