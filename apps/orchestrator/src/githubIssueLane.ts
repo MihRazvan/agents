@@ -9,6 +9,7 @@ interface JobLike {
   title: string;
   summary: string;
   submitter: string;
+  referenceUrl?: string;
   requestedSkills: string[];
   requiredTools: string[];
   deliverable: string;
@@ -78,10 +79,43 @@ function resetWorkspace(state: GithubIssueLaneState, rootDir: string): void {
   cpSync(fixtureDir(rootDir), state.workspaceDir, { recursive: true });
 }
 
+function parseGithubIssueReference(referenceUrl?: string): { owner: string; repo: string; issueNumber: string; issueUrl: string } | null {
+  if (!referenceUrl) {
+    return null;
+  }
+
+  try {
+    const url = new URL(referenceUrl);
+    if (url.hostname !== "github.com") {
+      return null;
+    }
+
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length < 4 || parts[2] !== "issues") {
+      return null;
+    }
+
+    const [owner, repo, , issueNumber] = parts;
+    if (!owner || !repo || !issueNumber || !/^\d+$/.test(issueNumber)) {
+      return null;
+    }
+
+    return {
+      owner,
+      repo,
+      issueNumber,
+      issueUrl: `https://github.com/${owner}/${repo}/issues/${issueNumber}`
+    };
+  } catch {
+    return null;
+  }
+}
+
 function fetchLiveIssue(job: JobLike): { payload: Record<string, unknown>; source: GithubIssueLaneState["source"]; issueTitle: string; issueNumber?: number; issueUrl?: string } {
-  const owner = process.env.GITHUB_OWNER;
-  const repo = process.env.GITHUB_REPO;
-  const issueNumber = process.env.GITHUB_ISSUE_NUMBER;
+  const parsedReference = parseGithubIssueReference(job.referenceUrl);
+  const owner = parsedReference?.owner ?? process.env.GITHUB_OWNER;
+  const repo = parsedReference?.repo ?? process.env.GITHUB_REPO;
+  const issueNumber = parsedReference?.issueNumber ?? process.env.GITHUB_ISSUE_NUMBER;
 
   if (!owner || !repo || !issueNumber) {
     return {
@@ -89,6 +123,7 @@ function fetchLiveIssue(job: JobLike): { payload: Record<string, unknown>; sourc
         title: job.title,
         body: job.summary,
         submitter: job.submitter,
+        referenceUrl: job.referenceUrl,
         labels: ["demo", "wallet-connect"],
         requestedSkills: job.requestedSkills,
         requiredTools: job.requiredTools
@@ -111,7 +146,7 @@ function fetchLiveIssue(job: JobLike): { payload: Record<string, unknown>; sourc
     source: "github_api",
     issueTitle: String(payload.title ?? job.title),
     issueNumber: Number(issueNumber),
-    issueUrl: String(payload.html_url ?? "")
+    issueUrl: String(payload.html_url ?? parsedReference?.issueUrl ?? "")
   };
 }
 
@@ -125,7 +160,7 @@ function planMarkdown(job: JobLike, issueTitle: string, issueUrl?: string): stri
 ## Plan
 
 1. Fetch the issue payload and preserve it as evidence
-2. Inspect the sandbox target for the wallet banner regression
+2. Inspect the referenced GitHub issue context and map it onto the sandbox target
 3. Apply the minimal patch that restores the expected connected state
 4. Run the test suite in the sandbox workspace
 5. Package the patch, test output, and delivery summary for publishing
@@ -180,6 +215,7 @@ function writeDelivery(state: GithubIssueLaneState, job: JobLike): void {
 - Job: ${job.title}
 - Issue source: ${state.source}
 - Issue title: ${state.issueTitle}
+- Issue URL: ${state.issueUrl ?? job.referenceUrl ?? "not provided"}
 - Deliverable: ${job.deliverable}
 
 ## Included artifacts

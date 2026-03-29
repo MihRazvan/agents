@@ -209,7 +209,7 @@ function SubmitJobCard({ httpBase, onClose }: { httpBase: string; onClose?: () =
         </label>
 
         <div className="job-form-hint">
-          {category === "github_bugfix" && "Attach the GitHub issue or repo link here. The city will fetch the issue if GitHub env vars are configured, then produce a patch and test bundle."}
+          {category === "github_bugfix" && "Attach a GitHub issue URL here. The city will fetch that issue when possible, then produce a plan, patch, test run, and delivery bundle."}
           {category === "contract_audit" && "Point to the contract, repo, or spec you want audited. The result is an audit summary and verification bundle."}
           {category === "protocol_research" && "Point to the topic or source. The research output becomes an artifact bundle and final brief for the destination you specify."}
           {category === "move_contract" && "Point to the Move module or repository. The city will validate it and package an attestation-style output."}
