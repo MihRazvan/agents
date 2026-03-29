@@ -428,6 +428,8 @@ export default function App() {
     const guardrailCopy = truncateCopy(job.guardrailSummary, mode === "open" ? 112 : 96);
     const outputCopy = truncateCopy(job.outputSummary, 124);
     const artifactLinks = artifactLinksForJob(job);
+    const deliveryArtifact = artifactLinks.find((artifact) => artifact.label === "Delivery") ?? null;
+    const supportingArtifacts = artifactLinks.filter((artifact) => artifact.label !== "Delivery");
     const trustDecision = extractTrustDecision(job);
     const correction = correctionBadge(job);
     const correctionSummary = correctionCopy(job);
@@ -470,13 +472,25 @@ export default function App() {
         {job.referenceUrl ? <p className="job-board-linkline">Reference: {job.referenceUrl}</p> : null}
         {job.deliveryTarget ? <p className="job-board-linkline">Destination: {job.deliveryTarget}</p> : null}
         {mode === "history" && outputCopy ? <p className="job-board-subcopy">Output: {outputCopy}</p> : null}
-        {artifactLinks.length > 0 ? (
-          <div className="job-artifact-links">
-            {artifactLinks.map((artifact) => (
-              <a key={artifact.label} href={artifact.href} target="_blank" rel="noreferrer" className="job-artifact-link">
-                {artifact.label}
-              </a>
-            ))}
+        {deliveryArtifact || supportingArtifacts.length > 0 ? (
+          <div className="job-evidence-block">
+            <div className="job-evidence-head">
+              <p className="job-evidence-label">Evidence Bundle</p>
+              {deliveryArtifact ? (
+                <a href={deliveryArtifact.href} target="_blank" rel="noreferrer" className="job-delivery-link">
+                  Open Delivery Bundle
+                </a>
+              ) : null}
+            </div>
+            {supportingArtifacts.length > 0 ? (
+              <div className="job-artifact-links">
+                {supportingArtifacts.map((artifact) => (
+                  <a key={artifact.label} href={artifact.href} target="_blank" rel="noreferrer" className="job-artifact-link">
+                    {artifact.label}
+                  </a>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </article>

@@ -949,6 +949,60 @@ button.roster-item {
   margin-top: 0.12rem;
 }
 
+.job-evidence-block {
+  display: grid;
+  gap: 0.42rem;
+  margin-top: 0.1rem;
+  padding-top: 0.14rem;
+}
+
+.job-evidence-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.job-evidence-label {
+  margin: 0;
+  color: #dce7f9;
+  font-size: 0.6rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.job-delivery-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.6rem;
+  padding: 0.3rem 0.56rem;
+  border-radius: 999px;
+  border: 1px solid rgba(104, 208, 165, 0.24);
+  background: rgba(104, 208, 165, 0.12);
+  color: #dbfff1;
+  text-decoration: none;
+  font-size: 0.58rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-family: "IBM Plex Mono", monospace;
+  transition:
+    transform 140ms ease,
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.job-delivery-link:hover {
+  transform: translateY(-1px);
+  border-color: rgba(133, 228, 188, 0.34);
+  background: rgba(104, 208, 165, 0.18);
+  color: #f2fff9;
+}
+
 .job-artifact-link {
   display: inline-flex;
   align-items: center;
