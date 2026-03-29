@@ -6,7 +6,7 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import * as THREE from "three";
 import { AGENT_COLORS, type ChatMessage, type Job, type Vec2, type WorldSnapshot } from "@trust-city/shared";
 import { buildStreamedCity, CHUNK_SIZE, type CityStructure } from "../city/generator";
-import { DistrictOverlay, DynamicRoads, JobBeacon, PluginRegistryBoard, RoleHubLandmarks, StructureBlock, TrafficLanes } from "../city/layers";
+import { DistrictOverlay, DistrictSetpieces, DynamicRoads, JobBeacon, PluginRegistryBoard, RoleHubLandmarks, StructureBlock, TrafficLanes } from "../city/layers";
 import AnimatedAgentAvatar from "./AnimatedAgentAvatar";
 
 interface Props {
@@ -594,6 +594,7 @@ export default function WorldScene({ snapshot, selectedAgentId, followAgentId, f
       <TrafficLanes center={streamAnchor} />
 
       {snapshot ? <DistrictOverlay snapshot={snapshot} selectedAgentId={selectedAgentId} /> : null}
+      <DistrictSetpieces />
       <RoleHubLandmarks />
       {snapshot ? <PluginRegistryBoard plugins={snapshot.pluginAgents} /> : null}
 

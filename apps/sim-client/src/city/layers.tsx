@@ -163,14 +163,144 @@ const PRELOAD_KENNEY_PATHS = [
   "/assets/kenney/industrial/building-a.glb",
   "/assets/kenney/industrial/building-q.glb",
   "/assets/kenney/industrial/building-r.glb",
+  "/assets/kenney/industrial/chimney-large.glb",
+  "/assets/kenney/industrial/chimney-medium.glb",
+  "/assets/kenney/industrial/detail-tank.glb",
   "/assets/kenney/suburban/building-type-a.glb",
   "/assets/kenney/suburban/building-type-j.glb",
   "/assets/kenney/suburban/building-type-q.glb",
+  "/assets/kenney/suburban/path-long.glb",
+  "/assets/kenney/suburban/planter.glb",
   "/assets/kenney/suburban/tree-large.glb"
 ];
 
 for (const path of PRELOAD_KENNEY_PATHS) {
   useGLTF.preload(path);
+}
+
+type KitAssetSpec = {
+  path: string;
+  position: [number, number, number];
+  fit: [number, number, number];
+  rotationY?: number;
+};
+
+function KitAsset({ path, position, fit, rotationY = 0 }: KitAssetSpec) {
+  const { scene } = useGLTF(path);
+  const prepared = useMemo(() => {
+    const next = scene.clone(true);
+    next.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+    return next;
+  }, [scene]);
+
+  const bbox = useMemo(() => new THREE.Box3().setFromObject(scene), [scene]);
+  const size = useMemo(() => bbox.getSize(new THREE.Vector3()), [bbox]);
+  const center = useMemo(() => bbox.getCenter(new THREE.Vector3()), [bbox]);
+  const scale = useMemo(() => {
+    const safeX = Math.max(size.x, 0.001);
+    const safeY = Math.max(size.y, 0.001);
+    const safeZ = Math.max(size.z, 0.001);
+    return Math.min(fit[0] / safeX, fit[1] / safeY, fit[2] / safeZ);
+  }, [fit, size.x, size.y, size.z]);
+
+  return (
+    <group position={position} rotation={[0, rotationY, 0]}>
+      <primitive object={prepared} position={[-center.x * scale, -bbox.min.y * scale, -center.z * scale]} scale={[scale, scale, scale]} />
+    </group>
+  );
+}
+
+function HubKitScene({ role }: { role: keyof typeof ROLE_HUBS }) {
+  const runway = (
+    <>
+      <KitAsset path="/assets/kenney/suburban/path-long.glb" position={[0, 0.02, 2.25]} fit={[2.6, 0.32, 7.8]} />
+      <KitAsset path="/assets/kenney/suburban/path-long.glb" position={[0, 0.02, -2.35]} fit={[2.6, 0.32, 7.8]} />
+    </>
+  );
+
+  if (role === "scout") {
+    return (
+      <group>
+        {runway}
+        <KitAsset path="/assets/kenney/suburban/building-type-a.glb" position={[-5.4, 0, -4.2]} fit={[4.4, 7.5, 4.4]} rotationY={Math.PI / 2} />
+        <KitAsset path="/assets/kenney/suburban/building-type-j.glb" position={[4.8, 0, -4.6]} fit={[4.6, 8.2, 4.6]} rotationY={-Math.PI / 2} />
+        <KitAsset path="/assets/kenney/suburban/building-type-q.glb" position={[-0.8, 0, 6.1]} fit={[4.4, 7.8, 4.4]} rotationY={Math.PI} />
+        <KitAsset path="/assets/kenney/suburban/tree-large.glb" position={[-6.8, 0, 5.2]} fit={[2.8, 4.8, 2.8]} />
+        <KitAsset path="/assets/kenney/suburban/tree-large.glb" position={[4.8, 0, 1.1]} fit={[2.5, 4.4, 2.5]} />
+      </group>
+    );
+  }
+
+  if (role === "planner") {
+    return (
+      <group>
+        <KitAsset path="/assets/kenney/suburban/path-long.glb" position={[0, 0.02, 0]} fit={[3.1, 0.4, 8.8]} rotationY={Math.PI / 2} />
+        <KitAsset path="/assets/kenney/suburban/path-long.glb" position={[0, 0.02, 0]} fit={[3.1, 0.4, 8.8]} />
+        <KitAsset path="/assets/kenney/commercial/building-f.glb" position={[0, 0, -6.7]} fit={[7.8, 11.5, 5.2]} />
+        <KitAsset path="/assets/kenney/commercial/building-a.glb" position={[-6.6, 0, 2.8]} fit={[4.6, 8.2, 4.2]} rotationY={Math.PI / 2} />
+        <KitAsset path="/assets/kenney/commercial/building-a.glb" position={[6.6, 0, 2.8]} fit={[4.6, 8.2, 4.2]} rotationY={-Math.PI / 2} />
+        <KitAsset path="/assets/kenney/suburban/planter.glb" position={[-2.4, 0.02, 3.6]} fit={[1.4, 0.8, 1.4]} />
+        <KitAsset path="/assets/kenney/suburban/planter.glb" position={[2.4, 0.02, 3.6]} fit={[1.4, 0.8, 1.4]} rotationY={Math.PI / 3} />
+      </group>
+    );
+  }
+
+  if (role === "builder") {
+    return (
+      <group>
+        <KitAsset path="/assets/kenney/industrial/building-a.glb" position={[-6.2, 0, -4.8]} fit={[6.6, 10.5, 5.4]} rotationY={Math.PI / 2} />
+        <KitAsset path="/assets/kenney/industrial/building-q.glb" position={[6.4, 0, -4.6]} fit={[6.4, 11.2, 5.2]} rotationY={-Math.PI / 2} />
+        <KitAsset path="/assets/kenney/industrial/building-r.glb" position={[0.4, 0, 6.4]} fit={[7.2, 11.4, 5.8]} rotationY={Math.PI} />
+        <KitAsset path="/assets/kenney/industrial/chimney-large.glb" position={[-2.4, 0, -7.2]} fit={[1.6, 8.6, 1.6]} />
+        <KitAsset path="/assets/kenney/industrial/chimney-medium.glb" position={[2.3, 0, -7.1]} fit={[1.4, 7.2, 1.4]} />
+        <KitAsset path="/assets/kenney/industrial/detail-tank.glb" position={[-5.8, 0, 4.6]} fit={[2.2, 2, 2.2]} />
+        <KitAsset path="/assets/kenney/industrial/detail-tank.glb" position={[5.8, 0, 4.4]} fit={[2.2, 2, 2.2]} rotationY={Math.PI / 4} />
+      </group>
+    );
+  }
+
+  if (role === "verifier") {
+    return (
+      <group>
+        <KitAsset path="/assets/kenney/suburban/path-long.glb" position={[0, 0.02, -0.4]} fit={[2.8, 0.32, 9.2]} />
+        <KitAsset path="/assets/kenney/commercial/building-a.glb" position={[-5.9, 0, -5.8]} fit={[4.6, 8.4, 4.4]} rotationY={Math.PI / 2} />
+        <KitAsset path="/assets/kenney/commercial/building-a.glb" position={[5.9, 0, -5.8]} fit={[4.6, 8.4, 4.4]} rotationY={-Math.PI / 2} />
+        <KitAsset path="/assets/kenney/commercial/building-f.glb" position={[0, 0, 6.5]} fit={[6.2, 10.2, 4.8]} rotationY={Math.PI} />
+        <KitAsset path="/assets/kenney/suburban/planter.glb" position={[-2.8, 0.02, 3.8]} fit={[1.2, 0.72, 1.2]} />
+        <KitAsset path="/assets/kenney/suburban/planter.glb" position={[2.8, 0.02, 3.8]} fit={[1.2, 0.72, 1.2]} rotationY={Math.PI / 4} />
+      </group>
+    );
+  }
+
+  return (
+    <group>
+      <KitAsset path="/assets/kenney/commercial/building-skyscraper-a.glb" position={[-6.8, 0, -3.8]} fit={[5.4, 15.8, 5.2]} rotationY={Math.PI / 2} />
+      <KitAsset path="/assets/kenney/commercial/building-skyscraper-c.glb" position={[0, 0, -7.6]} fit={[6.4, 18.4, 5.8]} />
+      <KitAsset path="/assets/kenney/commercial/building-skyscraper-e.glb" position={[7.2, 0, -3.6]} fit={[5.2, 16.4, 5.2]} rotationY={-Math.PI / 2} />
+      <KitAsset path="/assets/kenney/suburban/path-long.glb" position={[0, 0.02, 3.2]} fit={[3, 0.4, 9.4]} rotationY={Math.PI / 2} />
+      <KitAsset path="/assets/kenney/suburban/planter.glb" position={[-2.8, 0.02, 4.8]} fit={[1.3, 0.8, 1.3]} />
+      <KitAsset path="/assets/kenney/suburban/planter.glb" position={[2.8, 0.02, 4.8]} fit={[1.3, 0.8, 1.3]} rotationY={Math.PI / 4} />
+    </group>
+  );
+}
+
+export function DistrictSetpieces() {
+  const hubs = useMemo(() => Object.entries(ROLE_HUBS) as Array<[keyof typeof ROLE_HUBS, (typeof ROLE_HUBS)[keyof typeof ROLE_HUBS]]>, []);
+
+  return (
+    <group>
+      {hubs.map(([role, hub]) => (
+        <group key={`${role}-setpiece`} position={[hub.position.x, 0, hub.position.y]}>
+          <HubKitScene role={role} />
+        </group>
+      ))}
+    </group>
+  );
 }
 
 export function StructureBlock({ structure }: { structure: CityStructure }) {
