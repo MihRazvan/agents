@@ -166,6 +166,7 @@ let tick = 0;
 let loopStartedAt = Date.now();
 let cinematicFocus: string | undefined;
 let queuedJobIndex = 0;
+const stalledMovementTicks = new Map<string, number>();
 
 function hubPoint(role: AgentRole, offset?: Vec2): Vec2 {
   return {
@@ -232,10 +233,10 @@ function crowdConfigFor(agent: Pick<AgentRuntimeState, "speed" | "kind" | "role"
     radius: agent.kind === "plugin" ? 0.4 : agent.role === "builder" ? 0.44 : 0.42,
     height: 1.1,
     maxSpeed,
-    maxAcceleration: maxSpeed * 3.6,
-    collisionQueryRange: 2.2,
-    pathOptimizationRange: 8,
-    separationWeight: agent.kind === "plugin" ? 1.1 : 1.6
+    maxAcceleration: maxSpeed * 4.6,
+    collisionQueryRange: 3.2,
+    pathOptimizationRange: 10,
+    separationWeight: agent.kind === "plugin" ? 1.5 : 2.3
   };
 }
 
@@ -1217,8 +1218,23 @@ function tickMovement(deltaSeconds: number): boolean {
 
     const dx = snapshot.position.x - agent.position.x;
     const dy = snapshot.position.y - agent.position.y;
-    if (Math.hypot(dx, dy) > 0.0005) {
+    const stepDistance = Math.hypot(dx, dy);
+    const velocityMagnitude = Math.hypot(snapshot.velocity.x, snapshot.velocity.y);
+    const targetDistance = navigation.distance(snapshot.position, snapshot.target);
+    if (stepDistance > 0.0005) {
       moved = true;
+    }
+
+    if (snapshot.path.length > 0 && targetDistance > 1.2 && stepDistance < 0.01 && velocityMagnitude < 0.03) {
+      const stalled = (stalledMovementTicks.get(agent.id) ?? 0) + 1;
+      if (stalled >= 8) {
+        agent.path = navigation.setCrowdAgentTarget(agent.id, snapshot.target);
+        stalledMovementTicks.set(agent.id, 0);
+      } else {
+        stalledMovementTicks.set(agent.id, stalled);
+      }
+    } else {
+      stalledMovementTicks.set(agent.id, 0);
     }
 
     agent.position = snapshot.position;
