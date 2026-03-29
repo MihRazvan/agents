@@ -253,13 +253,53 @@ function HubKitScene({ role }: { role: keyof typeof ROLE_HUBS }) {
   if (role === "builder") {
     return (
       <group>
-        <KitAsset path="/assets/kenney/industrial/building-a.glb" position={[-6.2, 0, -4.8]} fit={[6.6, 10.5, 5.4]} rotationY={Math.PI / 2} />
-        <KitAsset path="/assets/kenney/industrial/building-q.glb" position={[6.4, 0, -4.6]} fit={[6.4, 11.2, 5.2]} rotationY={-Math.PI / 2} />
-        <KitAsset path="/assets/kenney/industrial/building-r.glb" position={[0.4, 0, 6.4]} fit={[7.2, 11.4, 5.8]} rotationY={Math.PI} />
-        <KitAsset path="/assets/kenney/industrial/chimney-large.glb" position={[-2.4, 0, -7.2]} fit={[1.6, 8.6, 1.6]} />
-        <KitAsset path="/assets/kenney/industrial/chimney-medium.glb" position={[2.3, 0, -7.1]} fit={[1.4, 7.2, 1.4]} />
-        <KitAsset path="/assets/kenney/industrial/detail-tank.glb" position={[-5.8, 0, 4.6]} fit={[2.2, 2, 2.2]} />
-        <KitAsset path="/assets/kenney/industrial/detail-tank.glb" position={[5.8, 0, 4.4]} fit={[2.2, 2, 2.2]} rotationY={Math.PI / 4} />
+        <mesh position={[0, 0.03, 0]} receiveShadow>
+          <boxGeometry args={[18.4, 0.12, 16.2]} />
+          <meshStandardMaterial color="#151817" emissive="#1a211d" emissiveIntensity={0.08} roughness={0.96} metalness={0.04} />
+        </mesh>
+        <mesh position={[0, 0.045, -5.6]} receiveShadow>
+          <boxGeometry args={[15.8, 0.04, 2.2]} />
+          <meshStandardMaterial color="#2b2f2a" emissive="#52462c" emissiveIntensity={0.1} roughness={0.92} />
+        </mesh>
+        <mesh position={[0, 0.045, 3.4]} receiveShadow>
+          <boxGeometry args={[14.8, 0.04, 2]} />
+          <meshStandardMaterial color="#242826" emissive="#3f5535" emissiveIntensity={0.06} roughness={0.92} />
+        </mesh>
+        {[-4.8, -1.6, 1.6, 4.8].map((x) => (
+          <mesh key={`builder-track-${x}`} position={[x, 0.06, 0]}>
+            <boxGeometry args={[0.12, 0.05, 12.8]} />
+            <meshStandardMaterial color="#5f5747" emissive="#5f5747" emissiveIntensity={0.08} roughness={0.7} metalness={0.24} />
+          </mesh>
+        ))}
+        {[-3.2, 0, 3.2].map((x) => (
+          <mesh key={`builder-pad-${x}`} position={[x, 0.12, 1.1]} castShadow receiveShadow>
+            <boxGeometry args={[1.4, 0.18, 1.1]} />
+            <meshStandardMaterial color="#48503f" emissive="#6a7b4b" emissiveIntensity={0.12} roughness={0.8} metalness={0.12} />
+          </mesh>
+        ))}
+        <mesh position={[0, 0.12, -1.4]} castShadow receiveShadow>
+          <boxGeometry args={[3.8, 0.18, 1.5]} />
+          <meshStandardMaterial color="#5c4830" emissive="#8f6f3b" emissiveIntensity={0.14} roughness={0.76} metalness={0.12} />
+        </mesh>
+        <mesh position={[-6.9, 2.4, -0.4]} castShadow>
+          <boxGeometry args={[0.24, 4.8, 0.24]} />
+          <meshStandardMaterial color="#2f3830" emissive="#436048" emissiveIntensity={0.18} roughness={0.42} metalness={0.34} />
+        </mesh>
+        <mesh position={[-4.9, 4.1, -0.4]} castShadow>
+          <boxGeometry args={[4.4, 0.16, 0.22]} />
+          <meshStandardMaterial color="#4e6a43" emissive="#9fe16e" emissiveIntensity={0.26} roughness={0.36} metalness={0.26} />
+        </mesh>
+        <mesh position={[-2.8, 3.2, -0.4]} castShadow>
+          <boxGeometry args={[0.18, 1.7, 0.18]} />
+          <meshStandardMaterial color="#4e6a43" emissive="#9fe16e" emissiveIntensity={0.22} roughness={0.42} metalness={0.18} />
+        </mesh>
+        <KitAsset path="/assets/kenney/industrial/building-a.glb" position={[-7.1, 0, -5.8]} fit={[6.8, 10.8, 5.8]} rotationY={Math.PI / 2} />
+        <KitAsset path="/assets/kenney/industrial/building-q.glb" position={[7.1, 0, -5.9]} fit={[6.8, 11.4, 5.6]} rotationY={-Math.PI / 2} />
+        <KitAsset path="/assets/kenney/industrial/building-r.glb" position={[0.4, 0, 7.6]} fit={[8.2, 12.2, 6.6]} rotationY={Math.PI} />
+        <KitAsset path="/assets/kenney/industrial/chimney-large.glb" position={[-3.2, 0, -8.1]} fit={[1.8, 9.8, 1.8]} />
+        <KitAsset path="/assets/kenney/industrial/chimney-medium.glb" position={[3.0, 0, -8]} fit={[1.55, 8.2, 1.55]} />
+        <KitAsset path="/assets/kenney/industrial/detail-tank.glb" position={[-6.2, 0, 5.4]} fit={[2.6, 2.2, 2.6]} />
+        <KitAsset path="/assets/kenney/industrial/detail-tank.glb" position={[6.2, 0, 5.2]} fit={[2.6, 2.2, 2.6]} rotationY={Math.PI / 4} />
       </group>
     );
   }
@@ -602,14 +642,22 @@ function HubGround({ role, color }: { role: keyof typeof ROLE_HUBS; color: strin
   if (role === "builder") {
     return (
       <group>
-        <mesh position={[0, 0.03, 0]}>
-          <boxGeometry args={[4.8, 0.08, 4.2]} />
-          <meshStandardMaterial color="#141a14" roughness={0.95} />
+        <mesh position={[0, 0.03, 0]} receiveShadow>
+          <boxGeometry args={[5.8, 0.08, 4.8]} />
+          <meshStandardMaterial color="#151a16" emissive="#1c231c" emissiveIntensity={0.06} roughness={0.95} />
         </mesh>
-        {[-1.2, 0, 1.2].map((x) => (
-          <mesh key={x} position={[x, 0.09, -1.2]}>
-            <boxGeometry args={[0.56, 0.18, 0.56]} />
-            <meshStandardMaterial color="#3d4a36" emissive="#516843" emissiveIntensity={0.14} roughness={0.8} />
+        <mesh position={[0, 0.09, -1.45]} receiveShadow>
+          <boxGeometry args={[4.9, 0.08, 0.42]} />
+          <meshStandardMaterial color="#5d4a2f" emissive="#7f6334" emissiveIntensity={0.1} roughness={0.82} />
+        </mesh>
+        <mesh position={[0, 0.09, 1.45]} receiveShadow>
+          <boxGeometry args={[4.9, 0.08, 0.42]} />
+          <meshStandardMaterial color="#274230" emissive="#365d42" emissiveIntensity={0.08} roughness={0.84} />
+        </mesh>
+        {[-1.8, 0, 1.8].map((x) => (
+          <mesh key={x} position={[x, 0.11, -0.2]} receiveShadow>
+            <boxGeometry args={[0.62, 0.12, 2.6]} />
+            <meshStandardMaterial color="#3f463f" emissive="#596857" emissiveIntensity={0.08} roughness={0.84} metalness={0.12} />
           </mesh>
         ))}
       </group>
@@ -687,17 +735,25 @@ function HubMonument({ role, color }: { role: keyof typeof ROLE_HUBS; color: str
   if (role === "builder") {
     return (
       <group>
-        <mesh position={[0, 0.42, 0]}>
-          <boxGeometry args={[0.34, 0.84, 0.34]} />
-          <meshStandardMaterial color="#1d2a24" emissive="#215034" emissiveIntensity={0.32} metalness={0.28} roughness={0.38} />
+        <mesh position={[0, 0.22, 0]} castShadow>
+          <boxGeometry args={[0.86, 0.36, 0.86]} />
+          <meshStandardMaterial color="#273128" emissive="#35563e" emissiveIntensity={0.18} metalness={0.22} roughness={0.4} />
         </mesh>
-        <mesh position={[0.44, 0.86, 0]} rotation={[0, 0, Math.PI / 8]}>
-          <boxGeometry args={[0.12, 1.54, 0.12]} />
-          {glowMaterial(color, 0.9, 0.86)}
+        <mesh position={[-0.54, 1.3, 0]} castShadow>
+          <boxGeometry args={[0.18, 2.4, 0.18]} />
+          <meshStandardMaterial color="#314135" emissive="#4a6e57" emissiveIntensity={0.18} metalness={0.28} roughness={0.34} />
         </mesh>
-        <mesh position={[0.78, 1.42, 0]}>
-          <boxGeometry args={[0.74, 0.08, 0.08]} />
-          {glowMaterial("#ecffc7", 1.1, 0.86)}
+        <mesh position={[0.58, 1.9, 0]} castShadow rotation={[0, 0, -Math.PI / 16]}>
+          <boxGeometry args={[2.5, 0.16, 0.16]} />
+          <meshStandardMaterial color="#567246" emissive="#98dd69" emissiveIntensity={0.28} metalness={0.24} roughness={0.32} />
+        </mesh>
+        <mesh position={[1.68, 1.28, 0]} castShadow>
+          <boxGeometry args={[0.18, 1.26, 0.18]} />
+          {glowMaterial(color, 0.92, 0.88)}
+        </mesh>
+        <mesh position={[1.68, 0.58, 0]} castShadow>
+          <boxGeometry args={[0.36, 0.18, 0.36]} />
+          {glowMaterial("#e9ffc1", 1.08, 0.9)}
         </mesh>
       </group>
     );
