@@ -880,6 +880,46 @@ button.roster-item {
   flex-wrap: wrap;
 }
 
+.job-github-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.job-github-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 160, 180, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: #dde7f8;
+  font-size: 0.58rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.job-github-pill-active {
+  border-color: rgba(127, 180, 255, 0.22);
+  background: rgba(127, 180, 255, 0.1);
+  color: #e4efff;
+}
+
+.job-github-pill-ready {
+  border-color: rgba(104, 208, 165, 0.22);
+  background: rgba(104, 208, 165, 0.1);
+  color: #dbfff1;
+}
+
+.job-github-pill-blocked {
+  border-color: rgba(234, 139, 139, 0.24);
+  background: rgba(234, 139, 139, 0.1);
+  color: #ffd8d8;
+}
+
 .job-trust-pill {
   display: inline-flex;
   align-items: center;

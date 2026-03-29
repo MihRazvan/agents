@@ -128,6 +128,50 @@ function correctionCopy(job: Job): string | null {
   return "Verification rejected the first patch and the city routed the job back to execution for another pass.";
 }
 
+function githubRepoSlug(referenceUrl: string | undefined): string | null {
+  if (!referenceUrl) {
+    return null;
+  }
+  try {
+    const url = new URL(referenceUrl);
+    if (url.hostname !== "github.com") {
+      return null;
+    }
+    const [owner, repo] = url.pathname.split("/").filter(Boolean);
+    return owner && repo ? `${owner}/${repo}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function githubBranchName(job: Job): string | null {
+  const candidates = [job.guardrailSummary, job.routingReason, job.outputSummary].filter(Boolean) as string[];
+  for (const value of candidates) {
+    const publishMatch = value.match(/publish branch\s+([^\s|]+)/i);
+    if (publishMatch?.[1]) {
+      return publishMatch[1];
+    }
+    const branchMatch = value.match(/branch[:\s]+([^\s|]+)/i);
+    if (branchMatch?.[1]) {
+      return branchMatch[1];
+    }
+  }
+  return null;
+}
+
+function githubWorkflowState(job: Job, artifactLinks: Array<{ label: string; href: string }>): { label: string; tone: "active" | "ready" | "blocked" } | null {
+  if (job.category !== "github_bugfix") {
+    return null;
+  }
+  if (job.status === "completed" && artifactLinks.some((artifact) => artifact.label === "PR Draft")) {
+    return { label: "PR-ready bundle", tone: "ready" };
+  }
+  if (job.status === "failed") {
+    return { label: "PR blocked", tone: "blocked" };
+  }
+  return { label: "Preparing PR flow", tone: "active" };
+}
+
 export default function App() {
   const [snapshot, setSnapshot] = useState<WorldSnapshot | null>(null);
   const [manifest, setManifest] = useState<AgentManifest | null>(null);
@@ -387,6 +431,9 @@ export default function App() {
     const trustDecision = extractTrustDecision(job);
     const correction = correctionBadge(job);
     const correctionSummary = correctionCopy(job);
+    const repoSlug = githubRepoSlug(job.referenceUrl);
+    const branchName = githubBranchName(job);
+    const githubWorkflow = githubWorkflowState(job, artifactLinks);
 
     return (
       <article
@@ -405,6 +452,13 @@ export default function App() {
           {job.submitter} · {formatRisk(job.riskLevel)} risk · {job.activeStageLabel}
           {job.selectedAgentName ? ` · ${job.selectedAgentName}` : ""}
         </p>
+        {job.category === "github_bugfix" ? (
+          <div className="job-github-row">
+            {repoSlug ? <span className="job-github-pill">Repo {repoSlug}</span> : null}
+            {branchName ? <span className="job-github-pill">Branch {branchName}</span> : null}
+            {githubWorkflow ? <span className={`job-github-pill job-github-pill-${githubWorkflow.tone}`}>{githubWorkflow.label}</span> : null}
+          </div>
+        ) : null}
         <div className="job-trust-row">
           <span className="job-trust-pill">Trust floor {job.requiredTrust.toFixed(2)}</span>
           {trustDecision ? <span className="job-trust-note">{trustDecision}</span> : null}
