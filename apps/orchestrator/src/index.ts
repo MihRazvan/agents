@@ -343,6 +343,7 @@ agents.forEach((agent) => registerAgentMotion(agent));
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+app.use("/artifacts", express.static(path.join(rootDir, "artifacts")));
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
@@ -585,6 +586,8 @@ function buildJobTemplates(): JobTemplate[] {
       priority: "priority",
       source: "github",
       submitter: "GitHub Queue",
+      referenceUrl: "https://github.com/zhentanme/zhentan/issues/12",
+      deliveryTarget: "PR-ready patch bundle with test evidence",
       requestedSkills: ["TypeScript", "debugging", "tests"],
       requiredTools: ["github_api", "git", "test_runner"],
       requiredTrust: 0.7,
@@ -706,28 +709,72 @@ function compactSkills(skills: string[]): string {
   return skills.slice(0, 3).join(", ");
 }
 
+function candidateFailureReason(agent: AgentRuntimeState, role: AgentRole, job: Job): string | null {
+  if (agent.role !== role) {
+    return null;
+  }
+
+  const threshold = stageTrustThreshold(role, job);
+  if (agent.trustScore < threshold) {
+    return `trust ${agent.trustScore.toFixed(2)} < ${threshold.toFixed(2)}`;
+  }
+
+  if (!agent.capabilities.taskCategories.includes(job.category)) {
+    return `category ${job.category} unsupported`;
+  }
+
+  if (role === "builder") {
+    const missingTools = job.requiredTools.filter((tool) => !agent.capabilities.supportedTools.includes(tool));
+    if (missingTools.length > 0) {
+      return `missing tools ${missingTools.join(", ")}`;
+    }
+  }
+
+  return null;
+}
+
+function topRejectedCandidates(role: AgentRole, job: Job, limit = 3): Array<{ agent: AgentRuntimeState; reason: string }> {
+  return agents
+    .filter((agent) => agent.role === role)
+    .map((agent) => ({ agent, reason: candidateFailureReason(agent, role, job) }))
+    .filter((entry): entry is { agent: AgentRuntimeState; reason: string } => Boolean(entry.reason))
+    .sort((left, right) => right.agent.trustScore - left.agent.trustScore)
+    .slice(0, limit);
+}
+
+function rejectedCandidateSummary(role: AgentRole, job: Job): string | null {
+  const rejected = topRejectedCandidates(role, job);
+  if (rejected.length === 0) {
+    return null;
+  }
+
+  return rejected.map(({ agent, reason }) => `${agent.name} (${reason})`).join("; ");
+}
+
 function stageRoutingReason(
   agent: AgentRuntimeState,
   step: { key: AgentPhase; role: AgentRole; label: string },
   job: Job,
   score: number
 ): string {
+  const rejectedSummary = rejectedCandidateSummary(step.role, job);
+
   if (step.role === "scout") {
-    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it is the highest-trust intake agent available for ${JOB_ROUTING[job.category].label}.`;
+    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it is the highest-trust intake agent available for ${JOB_ROUTING[job.category].label}.${rejectedSummary ? ` Trust gate excluded ${rejectedSummary}.` : ""}`;
   }
   if (step.role === "planner") {
-    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it specializes in decomposition, policy checks, and capability matching.`;
+    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it specializes in decomposition, policy checks, and capability matching.${rejectedSummary ? ` Lower-fit candidates were excluded: ${rejectedSummary}.` : ""}`;
   }
   if (step.role === "builder") {
     const skillOverlap = job.requestedSkills.filter((skill) =>
       agent.capabilities.primarySkills.some((entry) => entry.toLowerCase().includes(skill.toLowerCase()))
     );
-    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)}. Matched ${skillOverlap.length}/${job.requestedSkills.length} requested skills and ${agent.kind === "plugin" ? "adds plugin specialization" : "is a core city specialist"}.`;
+    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)}. Matched ${skillOverlap.length}/${job.requestedSkills.length} requested skills and ${agent.kind === "plugin" ? "adds plugin specialization" : "is a core city specialist"}.${rejectedSummary ? ` Trust/capability gate excluded ${rejectedSummary}.` : ""}`;
   }
   if (step.role === "verifier") {
-    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it carries the strongest trust profile for review and evidence checks.`;
+    return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it carries the strongest trust profile for review and evidence checks.${rejectedSummary ? ` Other reviewers were excluded: ${rejectedSummary}.` : ""}`;
   }
-  return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it has the strongest trust profile for final delivery and receipt publishing.`;
+  return `${agent.name} selected for ${step.label} with score ${score.toFixed(2)} because it has the strongest trust profile for final delivery and receipt publishing.${rejectedSummary ? ` Other publishers were excluded: ${rejectedSummary}.` : ""}`;
 }
 
 function stageGuardrailSummary(agent: AgentRuntimeState, step: { role: AgentRole }, job: Job, threshold: number): string {
@@ -831,13 +878,14 @@ function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState 
 
   if (!candidate) {
     const capableAgents = findCapableAgents(step.role, job);
+    const rejectedSummary = rejectedCandidateSummary(step.role, job);
     if (capableAgents.length > 0) {
       const candidateNames = capableAgents.slice(0, 3).map((agent) => agent.name).join(", ");
       updateJobDecisionState(job, {
         activeStageLabel: step.label,
         status: workflow.stage < 2 ? "queued" : job.status,
         blockedReason: `Waiting for an available ${step.role}. Qualified agents are busy: ${candidateNames}.`,
-        routingReason: `${JOB_ROUTING[job.category].label} is ready for ${step.label}, but all qualified ${step.role} agents are occupied.`,
+        routingReason: `${JOB_ROUTING[job.category].label} is ready for ${step.label}, but all qualified ${step.role} agents are occupied.${rejectedSummary ? ` Trust/capability gate also excluded ${rejectedSummary}.` : ""}`,
         guardrailSummary: `Trust gate: ${trustThreshold.toFixed(2)} | tools: ${job.requiredTools.join(", ")} | budget remaining: ${budget.maxToolCalls - budget.usedToolCalls}`
       });
       return null;
@@ -846,7 +894,7 @@ function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState 
     updateJobDecisionState(job, {
       activeStageLabel: step.label,
       blockedReason: `No ${step.role} cleared trust ${trustThreshold.toFixed(2)} and capability checks for ${JOB_ROUTING[job.category].label}.`,
-      routingReason: `${JOB_ROUTING[job.category].label} is blocked at ${step.label} because the marketplace has no qualified ${step.role}.`,
+      routingReason: `${JOB_ROUTING[job.category].label} is blocked at ${step.label} because the marketplace has no qualified ${step.role}.${rejectedSummary ? ` Rejections: ${rejectedSummary}.` : ""}`,
       guardrailSummary: `Rejected by safety policy: required trust ${trustThreshold.toFixed(2)} | tools: ${job.requiredTools.join(", ")}`
     });
     cinematicFocus = job.id;
@@ -892,6 +940,15 @@ function allocateStageAgent(job: Job, workflow: JobWorkflow): AgentRuntimeState 
     kind: candidate.kind,
     color: AGENT_COLORS[candidate.role]
   });
+  const rejectedSummary = rejectedCandidateSummary(step.role, job);
+  if (rejectedSummary) {
+    addChat("policy-engine", "Policy Engine", `${candidate.name} cleared ${step.label}. Excluded candidates: ${rejectedSummary}.`, "decision", {
+      recipientId: candidate.id,
+      recipientName: candidate.name,
+      jobId: job.id,
+      kind: "trust"
+    });
+  }
   if (previousActor && previousActor.id !== candidate.id) {
     addHandoffChat(previousActor, candidate, job, `Handing ${JOB_ROUTING[job.category].label} to ${candidate.name} for ${step.label}.`);
     addChat(candidate.id, candidate.name, `Received ${JOB_ROUTING[job.category].label}. Starting ${step.label}.`, "decision", {
@@ -932,9 +989,9 @@ function runGithubBugfixStage(step: { label: string; key: AgentPhase }, actor: A
     if (step.key === "plan") {
       updateJobDecisionState(job, {
         routingReason: `${actor.name} converted the issue into a concrete execution plan and saved the GitHub evidence bundle.`,
-        guardrailSummary: `Issue source: ${result.issueSource} | artifact dir: ${path.relative(rootDir, result.artifactDir)} | retries used: ${job.retries}/${budget.maxRetriesPerJob}`
+        guardrailSummary: `Issue source: ${result.issueSource} | repo: ${result.repoSlug ?? "sandbox issue lab"} | branch: ${result.prBranchName ?? "pending"} | retries used: ${job.retries}/${budget.maxRetriesPerJob}`
       });
-      addChat(actor.id, actor.name, `Issue captured from ${result.issueSource === "github_api" ? "GitHub API" : "the city queue"}. Plan written for execution.`, "decision", {
+      addChat(actor.id, actor.name, `Issue captured from ${result.issueSource === "github_api" ? "GitHub API" : "the city queue"}. Plan written for ${result.repoSlug ?? "sandbox issue lab"} on ${result.prBranchName ?? "local branch"}.`, "decision", {
         jobId: job.id,
         kind: "tool"
       });
@@ -943,13 +1000,24 @@ function runGithubBugfixStage(step: { label: string; key: AgentPhase }, actor: A
 
     if (step.key === "execute") {
       updateJobDecisionState(job, {
-        routingReason: `${actor.name} patched the sandbox workspace and produced a real diff artifact for the GitHub bugfix lane.`,
-        guardrailSummary: `Patch generated in ${path.relative(rootDir, result.artifactDir)} | awaiting test verification`
+        routingReason:
+          result.recoveryMode === "partial"
+            ? `${actor.name} produced a first remediation patch for the GitHub bugfix lane. Verification will confirm whether a second correction pass is needed.`
+            : `${actor.name} patched the sandbox workspace and produced a real diff artifact for the GitHub bugfix lane.`,
+        guardrailSummary: `Patch generated in ${path.relative(rootDir, result.artifactDir)} | branch ${result.prBranchName ?? "pending"} | awaiting test verification`
       });
-      addChat(actor.id, actor.name, "Patch prepared in the sandbox workspace. Handing off to verification.", "decision", {
-        jobId: job.id,
-        kind: "tool"
-      });
+      addChat(
+        actor.id,
+        actor.name,
+        result.recoveryMode === "partial"
+          ? "First remediation patch prepared. Handing off to verification to confirm whether another correction pass is required."
+          : "Patch prepared in the sandbox workspace. Handing off to verification.",
+        "decision",
+        {
+          jobId: job.id,
+          kind: "tool"
+        }
+      );
       return true;
     }
 
@@ -965,7 +1033,7 @@ function runGithubBugfixStage(step: { label: string; key: AgentPhase }, actor: A
       updateJobDecisionState(job, {
         blockedReason: undefined,
         routingReason: `${actor.name} ran the real sandbox test suite and confirmed the GitHub issue patch is valid.`,
-        guardrailSummary: `Tests passed in ${path.relative(rootDir, result.artifactDir)} | ready for publish`
+        guardrailSummary: `Tests passed in ${path.relative(rootDir, result.artifactDir)} | PR draft ready at ${path.relative(rootDir, result.prDraftFile ?? path.join(result.artifactDir, "pr-draft.md"))}`
       });
       addChat(actor.id, actor.name, "Sandbox tests passed. Safe to publish the bugfix bundle.", "decision", {
         jobId: job.id,
@@ -975,10 +1043,10 @@ function runGithubBugfixStage(step: { label: string; key: AgentPhase }, actor: A
     }
 
     updateJobDecisionState(job, {
-      routingReason: `${actor.name} packaged the GitHub issue bundle, including issue evidence, patch diff, and test output.`,
-      guardrailSummary: `Delivery bundle written to ${path.relative(rootDir, result.artifactDir)}`
+      routingReason: `${actor.name} packaged the GitHub issue bundle, including issue evidence, patch diff, test output, and a PR-ready delivery draft.`,
+      guardrailSummary: `Delivery bundle written to ${path.relative(rootDir, result.artifactDir)} | publish branch ${result.prBranchName ?? "pending"}`
     });
-    addChat(actor.id, actor.name, "Delivery bundle sealed with patch, tests, and issue evidence.", "decision", {
+    addChat(actor.id, actor.name, `Delivery bundle sealed with patch, tests, issue evidence, and PR draft on ${result.prBranchName ?? "the proposed branch"}.`, "decision", {
       jobId: job.id,
       kind: "delivery"
     });
@@ -1064,7 +1132,7 @@ function finalOutputSummary(job: Job, actor: AgentRuntimeState): string {
     return `Preview ready and packaged by ${actor.name}`;
   }
   if (job.category === "github_bugfix") {
-    return `Patch and test evidence prepared by ${actor.name}${job.artifactPath ? ` at ${path.relative(rootDir, job.artifactPath)}` : ""}`;
+    return `Patch, test evidence, and PR-ready draft prepared by ${actor.name}${job.artifactPath ? ` at ${path.relative(rootDir, job.artifactPath)}` : ""}`;
   }
   if (job.category === "protocol_research") {
     return `Research brief and source digest assembled by ${actor.name}`;
@@ -1097,14 +1165,47 @@ function completeStage(job: Job, workflow: JobWorkflow): void {
     setAgentIdle(actor.id);
     workflow.activeAgentId = undefined;
     if (step.key === "verify" && workflow.stage > 1) {
+      job.retries += 1;
+      addLog("retry", actor.id, "Verification failed; correction loop scheduled", {
+        jobId: job.id,
+        retries: job.retries,
+        retryLimit: budget.maxRetriesPerJob,
+        stage: step.key
+      });
+      if (job.retries > budget.maxRetriesPerJob) {
+        job.status = "failed";
+        job.outputSummary = "Verification kept failing before publish";
+        updateJobDecisionState(job, {
+          blockedReason: `Verification failed after ${job.retries} correction attempts.`,
+          guardrailSummary: `Verification retries ${job.retries}/${budget.maxRetriesPerJob} | publish blocked`
+        });
+        addLog("failure", actor.id, "Job marked failed after verification retries exhausted", {
+          jobId: job.id,
+          retries: job.retries,
+          stage: step.key
+        });
+        addChat("system", "System", `${job.title} failed after repeated verification rejections.`, "warning", {
+          jobId: job.id,
+          kind: "verification"
+        });
+        cinematicFocus = job.id;
+        return;
+      }
       workflow.stage = 2;
       const builder = findAgent(job.assignedAgentIds.find((agentId) => findAgent(agentId)?.role === "builder"));
+      updateJobDecisionState(job, {
+        status: "in_progress",
+        activeStageLabel: "execute",
+        routingReason: `${actor.name} rejected the patch and routed ${JOB_ROUTING[job.category].label} back to execution for correction.`,
+        guardrailSummary: `Verification failed | correction attempt ${job.retries}/${budget.maxRetriesPerJob} | publish blocked until green`
+      });
       addChat("agent-verifier-1", "Verifier Echo", "Sending work back to execution for correction.", "warning", {
         recipientId: builder?.id,
         recipientName: builder?.name,
         jobId: job.id,
         kind: "handoff"
       });
+      cinematicFocus = job.id;
     }
     return;
   }

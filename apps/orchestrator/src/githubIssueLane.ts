@@ -13,6 +13,7 @@ interface JobLike {
   requestedSkills: string[];
   requiredTools: string[];
   deliverable: string;
+  retries: number;
 }
 
 interface GithubIssueLaneState {
@@ -23,9 +24,15 @@ interface GithubIssueLaneState {
   patchFile: string;
   testFile: string;
   deliveryFile: string;
+  prDraftFile: string;
   issueTitle: string;
   issueNumber?: number;
   issueUrl?: string;
+  repoOwner?: string;
+  repoName?: string;
+  repoDefaultBranch?: string;
+  prBranchName?: string;
+  prTitle?: string;
   source: "github_api" | "synthetic_queue";
 }
 
@@ -67,6 +74,7 @@ function ensureArtifactState(rootDir: string, job: JobLike): GithubIssueLaneStat
     patchFile: path.join(artifactDir, "patch.diff"),
     testFile: path.join(artifactDir, "test-output.txt"),
     deliveryFile: path.join(artifactDir, "delivery.md"),
+    prDraftFile: path.join(artifactDir, "pr-draft.md"),
     issueTitle: job.title,
     source: "synthetic_queue"
   };
@@ -111,7 +119,42 @@ function parseGithubIssueReference(referenceUrl?: string): { owner: string; repo
   }
 }
 
-function fetchLiveIssue(job: JobLike): { payload: Record<string, unknown>; source: GithubIssueLaneState["source"]; issueTitle: string; issueNumber?: number; issueUrl?: string } {
+function githubApiHeaders(): string[] {
+  const headerArgs = ["-H", "Accept: application/vnd.github+json", "-H", "User-Agent: trust-city-exchange"];
+  if (process.env.GITHUB_TOKEN) {
+    headerArgs.push("-H", `Authorization: Bearer ${process.env.GITHUB_TOKEN}`);
+  }
+  return headerArgs;
+}
+
+function fetchGithubJson(endpoint: string): Record<string, unknown> {
+  const response = execFileSync("curl", ["-sSL", ...githubApiHeaders(), endpoint], { encoding: "utf8" });
+  return JSON.parse(response) as Record<string, unknown>;
+}
+
+function sanitizeBranchSegment(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 36);
+}
+
+function branchNameForIssue(issueNumber: number | undefined, issueTitle: string): string {
+  const suffix = sanitizeBranchSegment(issueTitle) || "issue-fix";
+  return `trust-city/issue-${issueNumber ?? "local"}-${suffix}`;
+}
+
+function fetchLiveIssue(job: JobLike): {
+  payload: Record<string, unknown>;
+  source: GithubIssueLaneState["source"];
+  issueTitle: string;
+  issueNumber?: number;
+  issueUrl?: string;
+  repoOwner?: string;
+  repoName?: string;
+  repoDefaultBranch?: string;
+} {
   const parsedReference = parseGithubIssueReference(job.referenceUrl);
   const owner = parsedReference?.owner ?? process.env.GITHUB_OWNER;
   const repo = parsedReference?.repo ?? process.env.GITHUB_REPO;
@@ -133,28 +176,38 @@ function fetchLiveIssue(job: JobLike): { payload: Record<string, unknown>; sourc
     };
   }
 
-  const endpoint = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`;
-  const headerArgs = ["-H", "Accept: application/vnd.github+json", "-H", "User-Agent: trust-city-exchange"];
-  if (process.env.GITHUB_TOKEN) {
-    headerArgs.push("-H", `Authorization: Bearer ${process.env.GITHUB_TOKEN}`);
-  }
-
-  const response = execFileSync("curl", ["-sSL", ...headerArgs, endpoint], { encoding: "utf8" });
-  const payload = JSON.parse(response) as Record<string, unknown>;
+  const issueEndpoint = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`;
+  const repoEndpoint = `https://api.github.com/repos/${owner}/${repo}`;
+  const payload = fetchGithubJson(issueEndpoint);
+  const repoPayload = fetchGithubJson(repoEndpoint);
   return {
-    payload,
+    payload: {
+      ...payload,
+      _trustCity: {
+        repo: {
+          owner,
+          name: repo,
+          defaultBranch: String(repoPayload.default_branch ?? "main"),
+          htmlUrl: String(repoPayload.html_url ?? `https://github.com/${owner}/${repo}`)
+        }
+      }
+    },
     source: "github_api",
     issueTitle: String(payload.title ?? job.title),
     issueNumber: Number(issueNumber),
-    issueUrl: String(payload.html_url ?? parsedReference?.issueUrl ?? "")
+    issueUrl: String(payload.html_url ?? parsedReference?.issueUrl ?? ""),
+    repoOwner: owner,
+    repoName: repo,
+    repoDefaultBranch: String(repoPayload.default_branch ?? "main")
   };
 }
 
-function planMarkdown(job: JobLike, issueTitle: string, issueUrl?: string): string {
+function planMarkdown(job: JobLike, issueTitle: string, issueUrl?: string, repoOwner?: string, repoName?: string, defaultBranch?: string): string {
   return `# Planner Output
 
 - Job: ${job.title}
 - Source issue: ${issueTitle}${issueUrl ? ` (${issueUrl})` : ""}
+- Repo target: ${repoOwner && repoName ? `${repoOwner}/${repoName}` : "sandbox issue lab"}${defaultBranch ? ` on ${defaultBranch}` : ""}
 - Goal: produce a tested remediation patch and publish the artifact bundle
 
 ## Plan
@@ -163,7 +216,7 @@ function planMarkdown(job: JobLike, issueTitle: string, issueUrl?: string): stri
 2. Inspect the referenced GitHub issue context and map it onto the sandbox target
 3. Apply the minimal patch that restores the expected connected state
 4. Run the test suite in the sandbox workspace
-5. Package the patch, test output, and delivery summary for publishing
+5. Package the patch, test output, delivery summary, and PR draft for publishing
 
 ## Guardrails
 
@@ -173,10 +226,22 @@ function planMarkdown(job: JobLike, issueTitle: string, issueUrl?: string): stri
 `;
 }
 
-function applyWalletFix(workspaceDir: string): void {
+function shouldForceRecovery(job: JobLike): boolean {
+  return (
+    job.submitter === "Demo Console" ||
+    /wallet connect regression/i.test(job.title) ||
+    /example\/repo\/issues\/184/i.test(job.referenceUrl ?? "")
+  );
+}
+
+function applyWalletFix(workspaceDir: string, mode: "partial" | "correct"): void {
   const walletFile = path.join(workspaceDir, "src", "wallet.js");
   const current = readFileSync(walletFile, "utf8");
-  const next = current.replace('  return "Wallet disconnected";\n}', '  return `Connected: ${address.slice(0, 6)}...${address.slice(-4)}`;\n}');
+  const replacement =
+    mode === "partial"
+      ? "  return `Connected: ${address}`;\n}"
+      : "  return `Connected: ${address.slice(0, 6)}...${address.slice(-4)}`;\n}";
+  const next = current.replace('  return "Wallet disconnected";\n}', replacement);
 
   if (current === next) {
     throw new Error("Known wallet regression pattern not found in sandbox source");
@@ -209,6 +274,33 @@ function runTests(state: GithubIssueLaneState): { ok: boolean; output: string } 
   return { ok: result.status === 0, output };
 }
 
+function writePrDraft(state: GithubIssueLaneState, job: JobLike): void {
+  const title = state.prTitle ?? `fix: resolve ${state.issueTitle.toLowerCase()}`;
+  const branchName = state.prBranchName ?? branchNameForIssue(state.issueNumber, state.issueTitle);
+  const body = `# Summary
+
+- closes ${state.issueUrl ?? "local issue"}
+- applies the Trust City GitHub lane patch in the sandbox workspace
+- includes test evidence from \`test-output.txt\`
+
+# Deliverables
+
+- Patch: \`patch.diff\`
+- Test output: \`test-output.txt\`
+- Planner notes: \`plan.md\`
+- Issue evidence: \`issue.json\`
+
+# Proposed branch
+
+\`${branchName}\`
+
+# Notes
+
+This draft is PR-ready copy generated for ${job.submitter}.`;
+
+  writeFileSync(state.prDraftFile, `# PR Draft\n\n- Title: ${title}\n- Branch: ${branchName}\n\n${body}\n`);
+}
+
 function writeDelivery(state: GithubIssueLaneState, job: JobLike): void {
   const delivery = `# Delivery Bundle
 
@@ -216,6 +308,9 @@ function writeDelivery(state: GithubIssueLaneState, job: JobLike): void {
 - Issue source: ${state.source}
 - Issue title: ${state.issueTitle}
 - Issue URL: ${state.issueUrl ?? job.referenceUrl ?? "not provided"}
+- Repo: ${state.repoOwner && state.repoName ? `${state.repoOwner}/${state.repoName}` : "sandbox issue lab"}
+- Base branch: ${state.repoDefaultBranch ?? "main"}
+- Proposed branch: ${state.prBranchName ?? branchNameForIssue(state.issueNumber, state.issueTitle)}
 - Deliverable: ${job.deliverable}
 
 ## Included artifacts
@@ -224,10 +319,11 @@ function writeDelivery(state: GithubIssueLaneState, job: JobLike): void {
 - plan.md
 - patch.diff
 - test-output.txt
+- pr-draft.md
 
 ## Result
 
-Patch prepared and test evidence captured for publisher handoff.
+Patch prepared, tests executed, and PR-ready delivery copied for publisher handoff.
 `;
 
   writeFileSync(state.deliveryFile, delivery);
@@ -238,7 +334,17 @@ export function runGithubIssueStage(
   stage: StageKey,
   job: JobLike,
   logger: Logger
-): { artifactDir: string; issueUrl?: string; issueSource: GithubIssueLaneState["source"]; issueTitle: string; testPassed?: boolean } {
+): {
+  artifactDir: string;
+  issueUrl?: string;
+  issueSource: GithubIssueLaneState["source"];
+  issueTitle: string;
+  testPassed?: boolean;
+  repoSlug?: string;
+  prBranchName?: string;
+  prDraftFile?: string;
+  recoveryMode?: "partial" | "correct";
+} {
   const state = ensureArtifactState(rootDir, job);
 
   if (stage === "plan") {
@@ -247,19 +353,29 @@ export function runGithubIssueStage(
     state.issueNumber = liveIssue.issueNumber;
     state.issueUrl = liveIssue.issueUrl;
     state.source = liveIssue.source;
+    state.repoOwner = liveIssue.repoOwner;
+    state.repoName = liveIssue.repoName;
+    state.repoDefaultBranch = liveIssue.repoDefaultBranch;
+    state.prBranchName = branchNameForIssue(liveIssue.issueNumber, liveIssue.issueTitle);
+    state.prTitle = `fix: resolve ${liveIssue.issueTitle.toLowerCase()}`;
 
     writeFileSync(state.issueFile, JSON.stringify(liveIssue.payload, null, 2));
-    writeFileSync(state.planFile, planMarkdown(job, liveIssue.issueTitle, liveIssue.issueUrl));
+    writeFileSync(state.planFile, planMarkdown(job, liveIssue.issueTitle, liveIssue.issueUrl, state.repoOwner, state.repoName, state.repoDefaultBranch));
     logger("Planner captured issue payload and wrote execution plan", {
       artifactDir: state.artifactDir,
       issueSource: state.source,
-      issueUrl: state.issueUrl
+      issueUrl: state.issueUrl,
+      repoSlug: state.repoOwner && state.repoName ? `${state.repoOwner}/${state.repoName}` : undefined,
+      proposedBranch: state.prBranchName
     });
     return {
       artifactDir: state.artifactDir,
       issueUrl: state.issueUrl,
       issueSource: state.source,
-      issueTitle: state.issueTitle
+      issueTitle: state.issueTitle,
+      repoSlug: state.repoOwner && state.repoName ? `${state.repoOwner}/${state.repoName}` : undefined,
+      prBranchName: state.prBranchName,
+      prDraftFile: state.prDraftFile
     };
   }
 
@@ -268,17 +384,23 @@ export function runGithubIssueStage(
       throw new Error("Plan artifact missing before execute stage");
     }
     resetWorkspace(state, rootDir);
-    applyWalletFix(state.workspaceDir);
+    const recoveryMode = shouldForceRecovery(job) && job.retries === 0 ? "partial" : "correct";
+    applyWalletFix(state.workspaceDir, recoveryMode);
     buildPatchDiff(state, rootDir);
     logger("Builder patched sandbox workspace and produced git diff", {
       artifactDir: state.artifactDir,
-      patchFile: state.patchFile
+      patchFile: state.patchFile,
+      recoveryMode
     });
     return {
       artifactDir: state.artifactDir,
       issueUrl: state.issueUrl,
       issueSource: state.source,
-      issueTitle: state.issueTitle
+      issueTitle: state.issueTitle,
+      repoSlug: state.repoOwner && state.repoName ? `${state.repoOwner}/${state.repoName}` : undefined,
+      prBranchName: state.prBranchName,
+      prDraftFile: state.prDraftFile,
+      recoveryMode
     };
   }
 
@@ -297,15 +419,21 @@ export function runGithubIssueStage(
     };
   }
 
+  writePrDraft(state, job);
   writeDelivery(state, job);
   logger("Publisher wrote delivery bundle for GitHub issue lane", {
     artifactDir: state.artifactDir,
-    deliveryFile: state.deliveryFile
+    deliveryFile: state.deliveryFile,
+    prDraftFile: state.prDraftFile,
+    proposedBranch: state.prBranchName
   });
   return {
     artifactDir: state.artifactDir,
     issueUrl: state.issueUrl,
     issueSource: state.source,
-    issueTitle: state.issueTitle
+    issueTitle: state.issueTitle,
+    repoSlug: state.repoOwner && state.repoName ? `${state.repoOwner}/${state.repoName}` : undefined,
+    prBranchName: state.prBranchName,
+    prDraftFile: state.prDraftFile
   };
 }

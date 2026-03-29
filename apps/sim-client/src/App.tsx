@@ -14,6 +14,7 @@ import {
 } from "@trust-city/shared";
 import SubmitJobCard from "./components/SubmitJobCard";
 import PlugInAgentCard from "./components/PlugInAgentCard";
+import TrustCityMark from "./components/TrustCityMark";
 import WorldScene from "./components/WorldScene";
 
 const httpBase = import.meta.env.VITE_ORCHESTRATOR_HTTP ?? "http://localhost:8787";
@@ -55,6 +56,76 @@ function truncateCopy(value: string | undefined, max = 180): string | null {
     return value;
   }
   return `${value.slice(0, max - 1).trimEnd()}…`;
+}
+
+function artifactLinksForJob(job: Job): Array<{ label: string; href: string }> {
+  if (!job.artifactPath) {
+    return [];
+  }
+
+  const base = `${httpBase}/artifacts/github-lane/${job.id}`;
+  return [
+    { label: "Issue", href: `${base}/issue.json` },
+    { label: "Plan", href: `${base}/plan.md` },
+    { label: "Patch", href: `${base}/patch.diff` },
+    { label: "Tests", href: `${base}/test-output.txt` },
+    { label: "PR Draft", href: `${base}/pr-draft.md` },
+    { label: "Delivery", href: `${base}/delivery.md` }
+  ];
+}
+
+function extractTrustDecision(job: Job): string | null {
+  const candidates = [job.routingReason, job.blockedReason, job.guardrailSummary].filter(Boolean) as string[];
+  for (const value of candidates) {
+    const match = value
+      .split(/(?<=[.!?])\s+/)
+      .find((segment) => /trust|excluded|rejections|qualified|safety policy/i.test(segment));
+    if (match) {
+      return truncateCopy(match, 118);
+    }
+  }
+  return null;
+}
+
+function receiptLabel(receipt: ReceiptRecord): string {
+  switch (receipt.action) {
+    case "identity_registry_registration":
+      return "Identity";
+    case "operator_link_validation":
+      return "Operator Link";
+    case "metadata_update":
+      return "Metadata";
+    case "reputation_registry_update":
+      return "Reputation";
+    case "validation_registry_write":
+      return "Validation";
+  }
+}
+
+function correctionBadge(job: Job): { label: string; tone: "active" | "resolved" | "failed" } | null {
+  if (job.retries <= 0) {
+    return null;
+  }
+  if (job.status === "completed") {
+    return { label: `Self-corrected · ${job.retries} retry${job.retries === 1 ? "" : "ies"}`, tone: "resolved" };
+  }
+  if (job.status === "failed") {
+    return { label: `Correction loop exhausted · ${job.retries} retry${job.retries === 1 ? "" : "ies"}`, tone: "failed" };
+  }
+  return { label: `Correction loop active · ${job.retries} retry${job.retries === 1 ? "" : "ies"}`, tone: "active" };
+}
+
+function correctionCopy(job: Job): string | null {
+  if (job.retries <= 0) {
+    return null;
+  }
+  if (job.status === "completed") {
+    return "Verification initially rejected the patch, then the builder corrected the work and publish completed.";
+  }
+  if (job.status === "failed") {
+    return "Verification kept rejecting the patch and the job hit its retry budget before publish.";
+  }
+  return "Verification rejected the first patch and the city routed the job back to execution for another pass.";
 }
 
 export default function App() {
@@ -232,6 +303,7 @@ export default function App() {
   const onchainStatus: OnchainStatus | null = snapshot?.onchainStatus ?? null;
   const recentChats = useMemo(() => [...(snapshot?.chats ?? [])].slice(-18).reverse(), [snapshot?.chats]);
   const selectedAgent = useMemo(() => (snapshot?.agents ?? []).find((agent) => agent.id === selectedAgentId) ?? null, [snapshot?.agents, selectedAgentId]);
+  const launchStatusLabel = snapshot ? "districts online" : wsStatus === "live" ? "hydrating world" : wsStatus === "offline" ? "reconnecting relay" : "linking relay";
 
   function focusAgent(agentId: string): void {
     setSelectedAgentId(agentId);
@@ -264,8 +336,8 @@ export default function App() {
           requiredTools: ["github_api", "git", "test_runner"],
           requiredTrust: 0.74,
           deliverable: "Patch artifact with test evidence",
-          referenceUrl: "https://github.com/example/repo/issues/184",
-          deliveryTarget: "Patch bundle and verification log"
+          referenceUrl: "https://github.com/zhentanme/zhentan/issues/12",
+          deliveryTarget: "PR-ready patch bundle and verification log"
         })
       });
 
@@ -311,6 +383,10 @@ export default function App() {
     const routingCopy = truncateCopy(job.routingReason, mode === "open" ? 152 : 132);
     const guardrailCopy = truncateCopy(job.guardrailSummary, mode === "open" ? 112 : 96);
     const outputCopy = truncateCopy(job.outputSummary, 124);
+    const artifactLinks = artifactLinksForJob(job);
+    const trustDecision = extractTrustDecision(job);
+    const correction = correctionBadge(job);
+    const correctionSummary = correctionCopy(job);
 
     return (
       <article
@@ -322,19 +398,33 @@ export default function App() {
         <div className="job-board-topline">
           <span className={`job-status-pill job-status-pill-${job.status}`}>{formatStatus(job.status)}</span>
           <span className="job-category-pill">{category.label}</span>
+          {correction ? <span className={`job-correction-pill job-correction-pill-${correction.tone}`}>{correction.label}</span> : null}
         </div>
         <h3>{job.title}</h3>
         <p className="job-board-meta">
           {job.submitter} · {formatRisk(job.riskLevel)} risk · {job.activeStageLabel}
           {job.selectedAgentName ? ` · ${job.selectedAgentName}` : ""}
         </p>
+        <div className="job-trust-row">
+          <span className="job-trust-pill">Trust floor {job.requiredTrust.toFixed(2)}</span>
+          {trustDecision ? <span className="job-trust-note">{trustDecision}</span> : null}
+        </div>
         {routingCopy ? <p className="job-board-copy">{routingCopy}</p> : null}
         {guardrailCopy ? <p className="job-board-subcopy">{guardrailCopy}</p> : null}
+        {correctionSummary ? <p className={`job-correction-copy job-correction-copy-${correction?.tone ?? "active"}`}>{correctionSummary}</p> : null}
         {job.blockedReason ? <p className="job-board-warning">Blocked: {job.blockedReason}</p> : null}
         {job.referenceUrl ? <p className="job-board-linkline">Reference: {job.referenceUrl}</p> : null}
         {job.deliveryTarget ? <p className="job-board-linkline">Destination: {job.deliveryTarget}</p> : null}
         {mode === "history" && outputCopy ? <p className="job-board-subcopy">Output: {outputCopy}</p> : null}
-        {mode === "history" && job.artifactPath ? <p className="job-board-linkline">Artifacts: {job.artifactPath}</p> : null}
+        {artifactLinks.length > 0 ? (
+          <div className="job-artifact-links">
+            {artifactLinks.map((artifact) => (
+              <a key={artifact.label} href={artifact.href} target="_blank" rel="noreferrer" className="job-artifact-link">
+                {artifact.label}
+              </a>
+            ))}
+          </div>
+        ) : null}
       </article>
     );
   }
@@ -363,11 +453,13 @@ export default function App() {
                 <h2>Live Handoffs</h2>
                 <p>{spotlightMode ? "Watch routing decisions and handoffs happen live." : followAgentId ? `Following ${selectedAgent?.name ?? "agent"}` : "Agent-to-agent decisions and delivery updates"}</p>
               </div>
-              {spotlightMode ? <p className="spotlight-hint">Look here: this is the running commentary for what the agents are deciding.</p> : null}
               <div className="scene-chat-list">
                 {recentChats.slice(0, 8).map((chat) => (
                   <div key={chat.id} className={`scene-chat-item scene-chat-item-${chat.tone}`}>
-                    <p className="scene-chat-actor">{formatChatHeader(chat)}</p>
+                    <p className="scene-chat-actor">
+                      {formatChatHeader(chat)}
+                      <span className={`scene-chat-kind scene-chat-kind-${chat.kind}`}>{chat.kind.replace(/_/g, " ")}</span>
+                    </p>
                     <span className="scene-chat-message">{chat.message}</span>
                   </div>
                 ))}
@@ -423,7 +515,6 @@ export default function App() {
                   ? "Most recent completed and failed work"
                   : "Completed jobs will accumulate here"}
             </p>
-            {spotlightMode && jobsTab === "open" ? <p className="spotlight-hint">Look here first: jobs progress from queued to verifying as agents take ownership.</p> : null}
             <div className="job-board-list">
               {jobsTab === "open"
                 ? openJobs.length > 0
@@ -566,13 +657,15 @@ export default function App() {
 
               <section className={`card receipt-card ${spotlightMode ? "spotlight-panel" : ""}`}>
                 <h2>Onchain Receipts</h2>
-                {spotlightMode ? <p className="spotlight-hint">Look here last: this is where the trust layer leaves a verifiable trail.</p> : null}
                 <div className="receipt-list">
                   {receipts.map((receipt) => (
                     <div key={receipt.id} className="receipt-item">
                       <p className={`receipt-mode receipt-mode-${receipt.mode}`}>{receipt.mode === "onchain" ? "live" : "sim"}</p>
                       <div>
-                        <p className="receipt-action">{receipt.action.replace(/_/g, " ")}</p>
+                        <div className="receipt-action-row">
+                          <p className="receipt-action">{receipt.action.replace(/_/g, " ")}</p>
+                          <span className={`receipt-badge receipt-badge-${receipt.action}`}>{receiptLabel(receipt)}</span>
+                        </div>
                         <p className="receipt-hash">
                           {receipt.explorerUrl ? (
                             <a href={receipt.explorerUrl} target="_blank" rel="noreferrer">
@@ -608,44 +701,54 @@ export default function App() {
         <div className="guide-modal-shell" role="presentation">
           <div className="guide-modal-backdrop" onClick={dismissGuide} />
           <section className="guide-modal" role="dialog" aria-modal="true" aria-labelledby="guide-modal-title">
-            <p className="workspace-kicker">City Operations</p>
-            <h2 id="guide-modal-title">Trust City</h2>
-            <p className="guide-modal-copy">
-              A live marketplace where specialized agents discover jobs, coordinate execution, verify outcomes, and deliver with trust-aware routing and
-              onchain receipts.
-            </p>
+            <div className="guide-modal-layout">
+              <aside className="guide-modal-brand">
+                <p className="workspace-kicker">City Operations</p>
+                <TrustCityMark size={110} className="guide-modal-mark" />
+                <div>
+                  <h2 id="guide-modal-title">Trust City</h2>
+                  <p className="guide-modal-copy">
+                    A live marketplace where specialized agents discover jobs, coordinate execution, verify outcomes, and deliver with trust-aware routing.
+                  </p>
+                </div>
+                <div className="guide-modal-signals" aria-hidden="true">
+                  <span>Autonomous loop</span>
+                  <span>Trust receipts</span>
+                  <span>Open market</span>
+                </div>
+              </aside>
 
-            <div className="guide-modal-grid">
-              <article className="guide-modal-panel">
-                <h3>1. Send work into the city</h3>
-                <p>Launch a demo GitHub fix or submit your own job. New work appears in Jobs and begins routing through the market immediately.</p>
-              </article>
-              <article className="guide-modal-panel">
-                <h3>2. Watch agents coordinate</h3>
-                <p>The 3D scene shows agents moving between hubs while Live Handoffs explains each delegation, retry, and delivery decision.</p>
-              </article>
-              <article className="guide-modal-panel">
-                <h3>3. Track status and receipts</h3>
-                <p>Jobs shows each stage, History shows outcomes, and System Details exposes receipts, logs, and operator context.</p>
-              </article>
-            </div>
+              <div className="guide-modal-main">
+                <ol className="guide-modal-steps">
+                  <li className="guide-modal-step">
+                    <span className="guide-modal-step-index">01</span>
+                    <div>
+                      <h3>Send work into the city</h3>
+                      <p>Launch a demo GitHub fix or submit your own job. New work appears in Jobs and begins routing through the market immediately.</p>
+                    </div>
+                  </li>
+                  <li className="guide-modal-step">
+                    <span className="guide-modal-step-index">02</span>
+                    <div>
+                      <h3>Watch agents coordinate</h3>
+                      <p>The 3D scene shows agents moving between hubs while Live Handoffs explains each delegation, retry, and delivery decision.</p>
+                    </div>
+                  </li>
+                  <li className="guide-modal-step">
+                    <span className="guide-modal-step-index">03</span>
+                    <div>
+                      <h3>Bring your own agent</h3>
+                      <p>Plug in your own agent from the dock to join the market, compete for work, and participate in trust-aware routing.</p>
+                    </div>
+                  </li>
+                </ol>
 
-            <div className="guide-modal-actions">
-              <button type="button" className="workspace-action workspace-action-primary" onClick={() => void launchDemoJob()}>
-                Run demo GitHub fix
-              </button>
-              <button type="button" className="workspace-action" onClick={followActiveAgent}>
-                Follow an active agent
-              </button>
-              <button type="button" className="workspace-action" onClick={() => setAdvancedOpen(true)}>
-                Open receipts and logs
-              </button>
-            </div>
-
-            <div className="guide-modal-enter">
-              <button type="button" className="workspace-action workspace-action-enter" onClick={dismissGuide}>
-                Enter city
-              </button>
+                <div className="guide-modal-enter">
+                  <button type="button" className="workspace-action workspace-action-enter" onClick={dismissGuide}>
+                    Enter city
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
         </div>
@@ -673,15 +776,20 @@ export default function App() {
         <div className="launch-splash" role="presentation" aria-hidden={snapshot ? "true" : undefined}>
           <div className="launch-splash-backdrop" />
           <div className="launch-splash-panel">
-            <p className="workspace-kicker">Midnight Exchange</p>
-            <h1>Trust City</h1>
-            <p className="launch-splash-copy">Loading the city, syncing world state, and opening the market.</p>
+            <div className="launch-splash-brand">
+              <TrustCityMark size={132} className="launch-splash-mark" />
+              <div className="launch-splash-copyblock">
+                <p className="workspace-kicker">Midnight Exchange</p>
+                <h1>Trust City</h1>
+                <p className="launch-splash-copy">Launching the autonomous market, syncing the relay, and staging the city.</p>
+              </div>
+            </div>
             <div className="launch-splash-progress" aria-hidden="true">
               <span className="launch-splash-progress-bar" />
             </div>
             <div className="launch-splash-status">
               <span className={`launch-splash-pill launch-splash-pill-${wsStatus}`}>{wsStatus === "live" ? "relay live" : wsStatus}</span>
-              <span>{snapshot ? "rendering city" : "syncing world state"}</span>
+              <span>{launchStatusLabel}</span>
             </div>
           </div>
         </div>
