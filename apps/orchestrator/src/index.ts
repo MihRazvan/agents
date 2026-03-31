@@ -39,10 +39,14 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "../../..");
 loadEnv({ path: path.join(rootDir, ".env") });
 
-const HTTP_PORT = Number(process.env.ORCHESTRATOR_PORT ?? "8787");
+const HTTP_PORT = Number(process.env.PORT ?? process.env.ORCHESTRATOR_PORT ?? "8787");
 const LOOP_INTERVAL_MS = 400;
 const MOVEMENT_INTERVAL_MS = 100;
 const WORLD_SEED = Number(process.env.WORLD_SEED ?? "271828");
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? process.env.FRONTEND_ORIGIN ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 const operatorWallet = process.env.OPERATOR_WALLET ?? "0xD3aDbeefD3aDbeefD3aDbeefD3aDbeefD3aDbeef";
 const erc8004Identity = process.env.AGENT_ERC8004_ID ?? "agent:erc8004:trust-city-exchange";
@@ -341,7 +345,22 @@ const agents: AgentRuntimeState[] = [
 agents.forEach((agent) => registerAgentMotion(agent));
 
 const app = express();
-app.use(cors());
+app.use(
+  cors(
+    allowedOrigins.length > 0
+      ? {
+          origin(origin, callback) {
+            if (!origin || allowedOrigins.includes(origin)) {
+              callback(null, true);
+              return;
+            }
+
+            callback(new Error(`CORS blocked origin: ${origin}`));
+          }
+        }
+      : undefined
+  )
+);
 app.use(express.json({ limit: "1mb" }));
 app.use("/artifacts", express.static(path.join(rootDir, "artifacts")));
 

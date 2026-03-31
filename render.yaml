@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: trust-city-orchestrator
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: npm install && npm run build -w @trust-city/orchestrator
+    startCommand: npm run start -w @trust-city/orchestrator
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: PORT
+        sync: false
+      - key: WORLD_SEED
+        value: "271828"
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: OPERATOR_PRIVATE_KEY
+        sync: false
+      - key: OPERATOR_WALLET
+        sync: false
+      - key: AGENT_ERC8004_ID
+        sync: false
+      - key: CHAIN_ID
+        value: "11155111"
+      - key: SEPOLIA_RPC_URL
+        sync: false
+      - key: IDENTITY_REGISTRY_ADDRESS
+        value: 0x8004A818BFB912233c491871b3d84c89A494BD9e
+      - key: REPUTATION_REGISTRY_ADDRESS
+        value: 0x8004B663056A597Dffe9eCcC1965A193B7388713
+      - key: VALIDATION_REGISTRY_ADDRESS
+        value: 0x8004CB39f29c09145F24Ad9dDe2A108C1A2cdfC5
+      - key: AGENT_METADATA_URI
+        sync: false
+      - key: ENABLE_ONCHAIN_WRITES
+        value: "true"
+      - key: ENABLE_VALIDATION_WRITES
+        value: "true"
+      - key: ENABLE_REPUTATION_WRITES
+        value: "true"
+      - key: FEEDBACK_CLIENT_PRIVATE_KEY
+        sync: false
+      - key: FEEDBACK_CLIENT_WALLET
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
