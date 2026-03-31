@@ -48,6 +48,14 @@ const OPEN_JOB_STATUS_ORDER = {
   completed: 5
 } as const;
 
+const DEMO_TEMPLATE_KEYS = new Set([
+  "microsite_build::Launch page for Move Sentinel",
+  "github_bugfix::Patch wallet connect regression",
+  "protocol_research::Research ERC-8004 collaboration patterns",
+  "move_contract::Review Move vault module",
+  "contract_audit::Audit plugin payout contract"
+]);
+
 function truncateCopy(value: string | undefined, max = 180): string | null {
   if (!value) {
     return null;
@@ -170,6 +178,14 @@ function githubWorkflowState(job: Job, artifactLinks: Array<{ label: string; hre
     return { label: "PR blocked", tone: "blocked" };
   }
   return { label: "Preparing PR flow", tone: "active" };
+}
+
+function jobTemplateKey(job: Pick<Job, "category" | "title">): string {
+  return `${job.category}::${job.title}`;
+}
+
+function isDemoTemplateJob(job: Pick<Job, "category" | "title">): boolean {
+  return DEMO_TEMPLATE_KEYS.has(jobTemplateKey(job));
 }
 
 export default function App() {
@@ -336,11 +352,32 @@ export default function App() {
   );
 
   const jobHistory = useMemo(
-    () =>
-      [...(snapshot?.jobs ?? [])]
+    () => {
+      const history = [...(snapshot?.jobs ?? [])]
         .filter((job) => job.status === "completed" || job.status === "failed")
-        .reverse()
-        .slice(0, 8),
+        .reverse();
+
+      const demoRunsByTemplate = new Map<string, number>();
+      const visibleHistory: Job[] = [];
+
+      for (const job of history) {
+        if (!isDemoTemplateJob(job)) {
+          visibleHistory.push(job);
+          continue;
+        }
+
+        const key = jobTemplateKey(job);
+        const count = demoRunsByTemplate.get(key) ?? 0;
+        if (count >= 2) {
+          continue;
+        }
+
+        demoRunsByTemplate.set(key, count + 1);
+        visibleHistory.push(job);
+      }
+
+      return visibleHistory.slice(0, 8);
+    },
     [snapshot?.jobs]
   );
 
