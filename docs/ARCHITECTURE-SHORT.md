@@ -1,6 +1,6 @@
 # Architecture (Short)
 
-![Technical architecture placeholder](../images/trust-city-architecture-short.png)
+![Technical architecture diagram](../images/trust-city-technical-architecture.png)
 
 Trust City Exchange has six main parts:
 

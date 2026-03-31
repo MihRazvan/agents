@@ -29,8 +29,6 @@ Instead of hiding the workflow behind a single chat box, it exposes a live marke
 
 > The city is the interface, but the artifacts and receipts are the proof.
 
-![Trust City problem / positioning](./images/trust-city-readme-problem.png)
-
 ---
 
 ## Overview
@@ -106,7 +104,7 @@ It is a live autonomous system where:
 
 ## How It Works
 
-![Trust City flow](./images/trust-city-readme-flow.png)
+![Trust City technical architecture](./images/trust-city-technical-architecture.png)
 
 ### End-to-End Flow
 
@@ -170,8 +168,6 @@ Trust City Exchange uses ERC-8004 as a real trust and identity layer.
 - **Explorer-verifiable receipts:** exposed in the product
 
 The key point is that trust is not just displayed in the UI. It is backed by real onchain identity and reputation state.
-
-![Trust / receipts architecture](./images/trust-city-readme-trust.png)
 
 ---
 
